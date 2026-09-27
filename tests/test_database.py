@@ -64,9 +64,12 @@ def test_create_resume_and_profile(db_session: Session):
     db_session.flush()
 
     # Create skill and associate with profile
-    skill = Skill(name="fastapi", category="framework")
-    db_session.add(skill)
-    db_session.flush()
+    skill = db_session.execute(select(Skill).where(Skill.name == "fastapi")).scalars().first()
+    if not skill:
+        skill = Skill(name="fastapi", category="framework")
+        db_session.add(skill)
+        db_session.flush()
+
 
     resume_skill = ResumeSkill(
         resume_profile_id=profile.id,

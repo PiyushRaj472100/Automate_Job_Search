@@ -2,9 +2,10 @@
 
 from fastapi import APIRouter
 
-from backend.api.routes import health
+from backend.api.routes import health, resumes
 
 api_router = APIRouter()
 
-# Include health routes under /api/v1 as well
+# Include routes under /api/v1
 api_router.include_router(health.router)
+api_router.include_router(resumes.router)

@@ -57,6 +57,8 @@ class ResumeProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     max_experience_years: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     sheet_tab_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    structured_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
 
     # Relationships
     resume: Mapped["Resume"] = relationship("Resume", back_populates="profiles")

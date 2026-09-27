@@ -72,11 +72,14 @@ def create_application() -> FastAPI:
         )
         return response
 
-    # Mount direct health route at root level: GET /health
+    # Mount direct health and resumes routes at root level: GET /health, POST /resumes, etc.
     app.include_router(health_router)
+    from backend.api.routes.resumes import router as resumes_router
+    app.include_router(resumes_router)
 
     # Mount versioned API routes: /api/v1/...
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+
 
     @app.get("/", include_in_schema=False)
     async def root():
