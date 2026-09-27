@@ -5,8 +5,10 @@ from collections.abc import AsyncGenerator, Generator
 import pytest
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.orm import Session
 
 from backend.core.config import Settings, get_settings
+from backend.db.session import sync_engine
 from backend.main import create_application
 
 
@@ -37,3 +39,19 @@ async def async_client(test_settings: Settings) -> AsyncGenerator[AsyncClient, N
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac
+
+
+@pytest.fixture
+def db_session() -> Generator[Session, None, None]:
+    """Provide an isolated database session that rolls back changes after each test."""
+    connection = sync_engine.connect()
+    transaction = connection.begin()
+    session = Session(bind=connection, expire_on_commit=False)
+
+    yield session
+
+    session.close()
+    if transaction.is_active:
+        transaction.rollback()
+    connection.close()
+

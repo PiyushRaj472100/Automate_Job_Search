@@ -75,3 +75,5 @@ logs/
 data/
 uploads/
 resumes/
+.pgdata/
+

@@ -50,10 +50,19 @@ class Settings(BaseSettings):
         description="Comma-separated list of allowed CORS origins",
     )
 
-    # Future Phase Placeholders (None by default in Phase 0)
+    # Database Settings (PostgreSQL System of Record)
+    POSTGRES_SERVER: str = Field(default="127.0.0.1", description="PostgreSQL host")
+    POSTGRES_PORT: int = Field(default=5433, description="PostgreSQL port")
+    POSTGRES_DB: str = Field(default="job_intelligence", description="PostgreSQL database name")
+    POSTGRES_USER: str = Field(default="postgres", description="PostgreSQL user")
+    POSTGRES_PASSWORD: str = Field(default="", description="PostgreSQL password")
     DATABASE_URL: str | None = Field(
         default=None,
-        description="PostgreSQL async connection string (Planned for Phase 1)",
+        description="Async PostgreSQL connection string (postgresql+asyncpg://...)",
+    )
+    SYNC_DATABASE_URL: str | None = Field(
+        default=None,
+        description="Sync PostgreSQL connection string for Alembic/psycopg2",
     )
     GEMINI_API_KEY: str | None = Field(
         default=None,
@@ -65,7 +74,26 @@ class Settings(BaseSettings):
     )
 
     @property
+    def database_url_async(self) -> str:
+        """Resolve async database connection string."""
+        if self.DATABASE_URL:
+            return self.DATABASE_URL
+        pwd = f":{self.POSTGRES_PASSWORD}" if self.POSTGRES_PASSWORD else ""
+        return f"postgresql+asyncpg://{self.POSTGRES_USER}{pwd}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+
+    @property
+    def database_url_sync(self) -> str:
+        """Resolve sync database connection string for Alembic and testing."""
+        if self.SYNC_DATABASE_URL:
+            return self.SYNC_DATABASE_URL
+        if self.DATABASE_URL:
+            return self.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+        pwd = f":{self.POSTGRES_PASSWORD}" if self.POSTGRES_PASSWORD else ""
+        return f"postgresql+psycopg2://{self.POSTGRES_USER}{pwd}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+
+    @property
     def cors_origins_list(self) -> list[str]:
+
         """Parse comma-separated CORS origins into a list of strings."""
         if not self.CORS_ORIGINS:
             return ["*"]

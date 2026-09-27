@@ -88,10 +88,11 @@ The platform serves as an operational copilot for manual applications: **it neve
 
 | Phase | Milestone | Scope | Status |
 | :--- | :--- | :--- | :--- |
-| **Phase 0** | **Foundation & Contract** | Project scaffolding, FastAPI, logging, config, Docker, tests | **ACTIVE** |
-| **Phase 1** | **System of Record** | PostgreSQL schema, migrations, connection pool, core repositories | Planned |
+| **Phase 0** | **Foundation & Contract** | Project scaffolding, FastAPI, logging, config, Docker, tests | **COMPLETED** |
+| **Phase 1** | **System of Record** | PostgreSQL schema, Alembic migrations, models, deduplication | **COMPLETED** |
 | **Phase 2** | **Resume Ingestion** | Multi-profile parsing, skills extraction, criteria definition | Planned |
 | **Phase 3** | **Job Discovery Engine** | Legal collectors, deduplication, URL normalization | Planned |
 | **Phase 4** | **Matching & Verification** | Gemini matching, missing skills analysis, HTTP URL verifier | Planned |
 | **Phase 5** | **Recruiters & Sheets** | Public recruiter discovery, Google Sheets live sync | Planned |
 | **Phase 6** | **Automation & Cloud** | Cloud Run, Cloud Scheduler, daily morning report pipeline | Planned |
+

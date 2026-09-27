@@ -144,6 +144,23 @@ docker compose up --build
 
 ---
 
+## Database Migrations (PostgreSQL)
+
+Run migrations to create or update the normalized schema:
+```powershell
+# Windows (PowerShell)
+.\scripts\run_migrations.ps1
+
+# Or via Alembic CLI
+alembic upgrade head
+```
+```bash
+# Linux / macOS
+./scripts/run_migrations.sh
+```
+
+---
+
 ## Running Tests and Linting
 
 ### Running Pytest
@@ -166,9 +183,10 @@ ruff check .
 ## Phase Roadmap
 
 - [x] **Phase 0: Foundation & Engineering Contract** *(Completed)*
-- [ ] **Phase 1: System of Record & Database Schemas**
+- [x] **Phase 1: System of Record & Database Schemas** *(Completed)*
 - [ ] **Phase 2: Multi-Resume Profile Ingestion**
 - [ ] **Phase 3: Source Discovery & Collector Framework**
 - [ ] **Phase 4: Gemini Matching & Deterministic Verification**
 - [ ] **Phase 5: Public Recruiter Discovery & Google Sheets Integration**
 - [ ] **Phase 6: Cloud Deployment & Daily Morning Orchestration**
+
