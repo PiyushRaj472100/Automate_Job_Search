@@ -2,7 +2,6 @@ import logging
 import re
 import httpx
 from bs4 import BeautifulSoup
-from ddgs import DDGS
 from backend.core.resilience import with_retry
 from backend.sources.base import SourceAdapter, NormalizedJob
 
