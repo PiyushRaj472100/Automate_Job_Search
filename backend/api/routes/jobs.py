@@ -76,7 +76,7 @@ async def list_jobs(
     work_mode: str | None = None,
     city: str | None = None,
     source: str | None = None,
-    sort_by: str = Query("latest", regex="^(latest|bangalore)$"),
+    sort_by: str = Query("latest", pattern="^(latest|bangalore)$"),
     limit: int = Query(60, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_session),
