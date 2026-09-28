@@ -15,6 +15,7 @@ from backend.models.resume import Resume
 from backend.sheets.client import GoogleSheetsManager
 from backend.sheets.constants import (
     ALL_TABS,
+    APPLICATION_STATUS_VALUES,
     DASHBOARD_ACTION_HEADERS,
     JOBS_HEADERS,
     SYSTEM_STATUS_HEADERS,
@@ -360,8 +361,11 @@ class GoogleSheetsService:
                     ws.clear()
                 except Exception as e:
                     logger.debug("Could not clear worksheet: %s", e)
-            for r in rows:
-                ws.append_row(r, value_input_option="USER_ENTERED")
+            try:
+                ws.update("A1", rows, value_input_option="USER_ENTERED")
+            except Exception:
+                for r in rows:
+                    ws.append_row(r, value_input_option="USER_ENTERED")
 
         # Format header row and alerts if format is available
         try:
@@ -443,8 +447,11 @@ class GoogleSheetsService:
                     ws.clear()
                 except Exception as e:
                     logger.debug("Could not clear system status worksheet: %s", e)
-            for r in rows:
-                ws.append_row(r, value_input_option="USER_ENTERED")
+            try:
+                ws.update("A1", rows, value_input_option="USER_ENTERED")
+            except Exception:
+                for r in rows:
+                    ws.append_row(r, value_input_option="USER_ENTERED")
 
         # Format header
         try:
@@ -460,3 +467,35 @@ class GoogleSheetsService:
                 })
         except Exception as e:
             logger.debug("Could not format system status tab: %s", e)
+
+    def set_application_status_validation(self, spreadsheet_id: str) -> None:
+        """Apply dropdown data validation on the 'Application Status' column in the Jobs tab."""
+        try:
+            client = self.manager.get_client()
+            sheet = client.open_by_key(spreadsheet_id)
+            ws = sheet.worksheet(TAB_JOBS)
+            col_idx = JOBS_HEADERS.index("Application Status") + 1
+            validation_rule = {
+                "setDataValidation": {
+                    "range": {
+                        "sheetId": getattr(ws, "id", 0),
+                        "startRowIndex": 1,
+                        "endRowIndex": 1000,
+                        "startColumnIndex": col_idx - 1,
+                        "endColumnIndex": col_idx,
+                    },
+                    "rule": {
+                        "condition": {
+                            "type": "ONE_OF_LIST",
+                            "values": [{"userEnteredValue": s} for s in APPLICATION_STATUS_VALUES],
+                        },
+                        "showCustomUi": True,
+                        "strict": True,
+                    },
+                }
+            }
+            if hasattr(sheet, "batch_update"):
+                sheet.batch_update({"requests": [validation_rule]})
+                logger.info("Configured dropdown data validation for Application Status in %s", ws.title)
+        except Exception as e:
+            logger.debug("Could not set data validation rule: %s", e)
