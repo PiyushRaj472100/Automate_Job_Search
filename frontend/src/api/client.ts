@@ -1,6 +1,6 @@
 import type { DiscoverySummary, Health, Readiness, Resume, ResumeProfile, SourceInfo } from "../types";
 
-const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8001";
+const BASE = import.meta.env.VITE_API_URL ?? "https://automate-job-search.onrender.com";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
