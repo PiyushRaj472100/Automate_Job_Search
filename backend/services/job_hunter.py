@@ -75,7 +75,7 @@ COURSE_AGGREGATOR_PATTERN = re.compile(
 LEVEL_REJECT_PATTERN = re.compile(
     r"\b("
     r"(?:data\s+scientist|software\s+engineer|ai\s+engineer|ml\s+engineer|machine\s+learning\s+engineer|developer|engineer)\s+(?:2|3|4|5|ii|iii|iv|v|l2|l3|lead|senior|principal|staff)"
-    r"|senior|sr\.|lead|principal|staff|manager|head\s+of|director|architect"
+    r"|senior|sr\.|lead|principal|staff|manager|head\s+of|director|architect|chief|vp"
     r"|sde\s*2|sde-2|sde2|sde\s*ii|sde\s*3|sde-3|sde3|sde\s*iii|mid-level|mid\s+level|intermediate"
     r")\b",
     re.IGNORECASE

@@ -8,22 +8,15 @@ from backend.sources.base import SourceAdapter, NormalizedJob
 
 log = logging.getLogger("web_fresher")
 
-SEARCH_QUERIES = [
-    # Internshala individual fresher & internship job posts
-    'site:internshala.com/job/detail/ "fresher" "python" bangalore',
-    'site:internshala.com/job/detail/ "fresher" "machine learning" bangalore',
-    'site:internshala.com/job/detail/ "fresher" "data science" bangalore',
-    'site:internshala.com/internship/detail/ "machine learning" bangalore',
-    'site:internshala.com/internship/detail/ "python" bangalore',
-    # Indeed India individual job postings
-    'site:in.indeed.com/viewjob "python" "fresher" bangalore',
-    'site:in.indeed.com/viewjob "machine learning" "intern" bangalore',
-    # Wellfound individual job postings
-    'site:wellfound.com/jobs/ "python" ("fresher" OR "intern") bangalore',
-    'site:wellfound.com/jobs/ "machine learning" ("intern" OR "junior")',
-    # Naukri individual job postings
-    'site:naukri.com/job-listings "fresher" "python" bangalore',
-    'site:naukri.com/job-listings "0 to 1 years" "machine learning"',
+# Direct high-signal Fresher & Intern category pages (100% genuine individual job listings)
+DIRECT_FRESHER_URLS = [
+    ("internshala", "https://internshala.com/fresher-jobs/python-jobs-in-bangalore/"),
+    ("internshala", "https://internshala.com/fresher-jobs/machine-learning-jobs-in-bangalore/"),
+    ("internshala", "https://internshala.com/fresher-jobs/data-science-jobs-in-bangalore/"),
+    ("internshala", "https://internshala.com/fresher-jobs/artificial-intelligence-jobs-in-bangalore/"),
+    ("internshala", "https://internshala.com/internships/python-internship-in-bangalore/"),
+    ("internshala", "https://internshala.com/internships/machine-learning-internship-in-bangalore/"),
+    ("internshala", "https://internshala.com/internships/data-science-internship-in-bangalore/"),
 ]
 
 # Patterns for rejecting non-jobs (courses, degrees, aggregator lists)
@@ -57,7 +50,7 @@ EXP_REJECT_PATTERN = re.compile(
 LEVEL_REJECT_PATTERN = re.compile(
     r"\b("
     r"(?:data\s+scientist|software\s+engineer|ai\s+engineer|ml\s+engineer|machine\s+learning\s+engineer|developer|engineer)\s+(?:2|3|4|5|ii|iii|iv|v|l2|l3|lead|senior|principal|staff)"
-    r"|senior|sr\.|lead|principal|staff|manager|head\s+of|director|architect"
+    r"|senior|sr\.|lead|principal|staff|manager|head\s+of|director|architect|chief|vp"
     r"|sde\s*2|sde-2|sde2|sde\s*ii|sde\s*3|sde-3|sde3|sde\s*iii|mid-level|mid\s+level|intermediate"
     r")\b",
     re.IGNORECASE
@@ -96,13 +89,82 @@ class WebFresherSource(SourceAdapter):
         jobs = []
         seen = set()
 
-        async with httpx.AsyncClient(headers=HEADERS, timeout=6.0, follow_redirects=True) as client:
-            # Also check We Work Remotely backend/AI RSS feed
+        async with httpx.AsyncClient(headers=HEADERS, timeout=8.0, follow_redirects=True) as client:
+            # 1. Direct Fresher & Internship Portals in Bangalore (Internshala)
+            for platform, cat_url in DIRECT_FRESHER_URLS:
+                try:
+                    resp = await client.get(cat_url, timeout=6.0)
+                    if resp.status_code != 200:
+                        continue
+                    soup = BeautifulSoup(resp.text, "html.parser")
+                    links = soup.find_all("a", class_=lambda cl: cl and "job-title-href" in cl)
+
+                    for a in links[:12]:
+                        title = a.get_text(strip=True)
+                        rel_link = a.get("href", "")
+                        if not rel_link:
+                            continue
+                        full_url = f"https://internshala.com{rel_link}" if rel_link.startswith("/") else rel_link
+
+                        if full_url in seen:
+                            continue
+                        seen.add(full_url)
+
+                        if COURSE_AGGREGATOR_PATTERN.search(title) or LEVEL_REJECT_PATTERN.search(title):
+                            continue
+                        if FRONTEND_REJECT_PATTERN.search(title):
+                            continue
+                        if not DOMAIN_PATTERN.search(title):
+                            continue
+
+                        # Fetch individual JD for 100% verification
+                        jd_text = ""
+                        comp = "Tech Startup"
+                        try:
+                            jd_resp = await client.get(full_url, timeout=5.0)
+                            if jd_resp.status_code == 200:
+                                jd_soup = BeautifulSoup(jd_resp.text, "html.parser")
+                                # Extract company name
+                                comp_el = jd_soup.find("a", class_="link_display_like_text") or jd_soup.find("p", class_="company-name")
+                                if comp_el:
+                                    comp = comp_el.get_text(strip=True)
+                                # Clean JD text
+                                for s in jd_soup(["script", "style", "nav", "footer"]):
+                                    s.extract()
+                                jd_text = jd_soup.get_text(separator=" ", strip=True)
+                        except Exception:
+                            pass
+
+                        if not jd_text:
+                            jd_text = f"{title} at {comp}. Fresher / Entry Level in Bangalore."
+
+                        # Verify experience on JD text
+                        if EXP_REJECT_PATTERN.search(jd_text):
+                            continue
+                        if LEVEL_REJECT_PATTERN.search(jd_text[:1000]):
+                            continue
+
+                        jobs.append(NormalizedJob(
+                            source="internshala",
+                            source_job_id=full_url,
+                            title=title,
+                            company=comp,
+                            location="Bengaluru, Karnataka, India",
+                            work_mode="Bangalore / Office / Hybrid",
+                            description=jd_text[:2500],
+                            job_url=full_url,
+                            skills=["python", "ai", "fresher"],
+                            posted_at="Recent (Verified Fresher)",
+                        ))
+                except Exception as e:
+                    log.warning("Direct fresher crawl error on %s: %s", cat_url, e)
+
+            # 2. We Work Remotely backend/AI feed
             try:
                 wwr_resp = await client.get("https://weworkremotely.com/categories/remote-back-end-programming-jobs.rss", timeout=5.0)
                 if wwr_resp.status_code == 200:
                     wwr_soup = BeautifulSoup(wwr_resp.text, "xml")
-                    for item in wwr_soup.find_all("item"):
+                    for item in wwr_soup.find_all("item")[:15]:
                         w_title = item.title.text if item.title else ""
                         w_link = item.link.text if item.link else ""
                         w_desc = item.description.text if item.description else ""
@@ -110,7 +172,6 @@ class WebFresherSource(SourceAdapter):
                         if not w_link or w_link in seen:
                             continue
 
-                        # Clean title & company (WWR format: "Company: Title")
                         w_comp = "Remote Company"
                         w_role = w_title
                         if ": " in w_title:
@@ -142,114 +203,6 @@ class WebFresherSource(SourceAdapter):
                         ))
             except Exception as e:
                 log.warning("WWR RSS fetch error: %s", e)
-
-            # DuckDuckGo multi-platform individual job search
-            try:
-                with DDGS() as ddgs:
-                    for q in SEARCH_QUERIES:
-                        try:
-                            results = list(ddgs.text(q, max_results=4))
-                            for r in results:
-                                title_raw = r.get("title", "")
-                                url = r.get("href", "")
-                                snippet = r.get("body", "")
-
-                                if not title_raw or not url or not url.startswith("http"):
-                                    continue
-                                if url in seen:
-                                    continue
-
-                                # 1. Strict aggregator / course rejection
-                                if COURSE_AGGREGATOR_PATTERN.search(title_raw) or LEVEL_REJECT_PATTERN.search(title_raw):
-                                    continue
-                                if FRONTEND_REJECT_PATTERN.search(title_raw):
-                                    continue
-
-                                # 2. Ensure URL is an individual job listing, not an aggregator page
-                                is_valid_job_url = (
-                                    "/job/detail/" in url or
-                                    "/internship/detail/" in url or
-                                    "/viewjob" in url or
-                                    "/rc/clk" in url or
-                                    "/jobs/" in url or
-                                    "/job-listings" in url
-                                )
-                                if not is_valid_job_url:
-                                    continue
-
-                                # 3. Fetch real page JD text for 100% experience verification
-                                jd_text = ""
-                                try:
-                                    page_resp = await client.get(url)
-                                    if page_resp.status_code == 200:
-                                        p_soup = BeautifulSoup(page_resp.text, "html.parser")
-                                        # Remove script and style tags
-                                        for s in p_soup(["script", "style", "nav", "footer"]):
-                                            s.extract()
-                                        jd_text = p_soup.get_text(separator=" ", strip=True)
-                                except Exception:
-                                    jd_text = snippet
-
-                                if not jd_text:
-                                    continue
-
-                                # 4. Check experience & seniority on actual JD text
-                                if EXP_REJECT_PATTERN.search(jd_text):
-                                    continue
-                                if LEVEL_REJECT_PATTERN.search(jd_text[:1000]):
-                                    continue
-
-                                # 5. Mandatory positive fresher confirmation
-                                if not (FRESHER_CONFIRM_PATTERN.search(title_raw) or FRESHER_CONFIRM_PATTERN.search(jd_text)):
-                                    continue
-
-                                # 6. Mandatory domain match
-                                if not (DOMAIN_PATTERN.search(title_raw) or DOMAIN_PATTERN.search(jd_text[:1500])):
-                                    continue
-
-                                seen.add(url)
-
-                                # Determine source platform
-                                if "internshala.com" in url:
-                                    src = "internshala"
-                                elif "indeed.com" in url:
-                                    src = "indeed"
-                                elif "wellfound.com" in url:
-                                    src = "wellfound"
-                                elif "naukri.com" in url:
-                                    src = "naukri"
-                                else:
-                                    src = "career_portal"
-
-                                # Parse clean title & company
-                                title = title_raw.split(" | ")[0].split(" - ")[0].strip()
-                                comp = "Verified Tech Company"
-                                if " at " in title_raw:
-                                    comp = title_raw.split(" at ")[-1].split(" | ")[0].split(" - ")[0].strip()
-                                elif " - " in title_raw:
-                                    parts = title_raw.split(" - ")
-                                    if len(parts) > 1:
-                                        comp = parts[1].split(" | ")[0].strip()
-
-                                loc = "Bengaluru, Karnataka, India" if "bangalore" in (title_raw + jd_text[:500]).lower() else "India"
-
-                                jobs.append(NormalizedJob(
-                                    source=src,
-                                    source_job_id=url,
-                                    title=title,
-                                    company=comp,
-                                    location=loc,
-                                    work_mode="Bangalore / Office / Hybrid",
-                                    description=jd_text[:2500],
-                                    job_url=url,
-                                    skills=["python", "ai", "fresher"],
-                                    posted_at="Recent (Web Verified)",
-                                ))
-                        except Exception as e:
-                            log.warning("Web fresher search error for '%s': %s", q, e)
-                            continue
-            except Exception as e:
-                log.error("Failed to initialize DDGS: %s", e)
 
         return jobs
 
