@@ -15,7 +15,9 @@ from backend.models.resume import Resume
 from backend.sheets.client import GoogleSheetsManager
 from backend.sheets.constants import (
     ALL_TABS,
+    DASHBOARD_ACTION_HEADERS,
     JOBS_HEADERS,
+    SYSTEM_STATUS_HEADERS,
     TAB_DASHBOARD,
     TAB_HEADERS_MAP,
     TAB_JOBS,
@@ -208,3 +210,253 @@ class GoogleSheetsService:
             [component, status_val, datetime.now(UTC).isoformat(), details, "Automated Status Audit"],
             value_input_option="USER_ENTERED",
         )
+
+    def update_dashboard_daily_view(
+        self,
+        spreadsheet_id: str,
+        dashboard_data: dict[str, Any],
+    ) -> None:
+        """Update Dashboard tab into the primary morning operational command center.
+
+        Highlights actionable opportunities (New, Verified, Strong/Relevant matches)
+        and operational KPIs. Prominently displays PIPELINE ERROR if an overnight failure occurred.
+        """
+        client = self.manager.get_client()
+        sheet = client.open_by_key(spreadsheet_id)
+        ws = sheet.worksheet(TAB_DASHBOARD)
+
+        pipeline_status = dashboard_data.get("pipeline_status", "OPERATIONAL")
+        is_error = pipeline_status == "PIPELINE ERROR" or bool(dashboard_data.get("source_errors"))
+        status_label = "PIPELINE ERROR" if is_error else "OPERATIONAL"
+        status_symbol = "▲" if is_error else "●"
+
+        rows: list[list[str]] = []
+        rows.append(["DAILY OPERATIONAL DASHBOARD — MORNING ACTION CENTER", "", "", ""])
+        rows.append([
+            f"{status_symbol} SYSTEM STATUS: {status_label}",
+            "",
+            "",
+            f"Generated: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        ])
+
+        if is_error:
+            error_details = (
+                "; ".join(str(e) for e in dashboard_data.get("source_errors", []))
+                or "Pipeline encountered errors overnight."
+            )
+            rows.append([
+                "[CRITICAL ALERT] Overnight pipeline failed! 0 new jobs reflects a system failure, NOT a lack of available opportunities.",
+                "",
+                "",
+                "",
+            ])
+            rows.append([f"Failure Details: {error_details}", "", "", ""])
+        else:
+            rows.append(["All continuous discovery and conservative verification passes completed successfully.", "", "", ""])
+
+        rows.append(["", "", "", ""])
+
+        # Section 1: Daily Operational Metrics
+        rows.append(["--- DAILY OPERATIONAL METRICS ---", "", "", ""])
+        rows.append(["Metric", "Value", "Status / Details", "Timestamp"])
+
+        metrics = [
+            ("Pipeline status", status_label, "CRITICAL ERROR" if is_error else "HEALTHY", datetime.now(UTC).isoformat()),
+            ("Last discovery", str(dashboard_data.get("last_discovery", "N/A")), "Active cycles", datetime.now(UTC).isoformat()),
+            ("Last verification", str(dashboard_data.get("last_verification", "N/A")), "Morning pass complete", datetime.now(UTC).isoformat()),
+            ("Jobs discovered", str(dashboard_data.get("jobs_discovered", 0)), "Discovered listings", datetime.now(UTC).isoformat()),
+            ("Jobs verified", str(dashboard_data.get("jobs_verified", 0)), "Usable / Active postings", datetime.now(UTC).isoformat()),
+            ("Strong matches", str(dashboard_data.get("strong_matches", 0)), "High priority opportunities", datetime.now(UTC).isoformat()),
+            ("Relevant matches", str(dashboard_data.get("relevant_matches", 0)), "Eligible opportunities", datetime.now(UTC).isoformat()),
+            ("Closed/rejected", str(dashboard_data.get("closed_or_expired", 0)), "Expired / Failed criteria", datetime.now(UTC).isoformat()),
+            (
+                "Source errors",
+                str(len(dashboard_data.get("source_errors", []))) if not is_error else f"ERRORS: {len(dashboard_data.get('source_errors', []))}",
+                "Check 'System Status' tab" if is_error else "None",
+                datetime.now(UTC).isoformat(),
+            ),
+        ]
+
+        for m_name, m_val, m_desc, m_time in metrics:
+            rows.append([m_name, m_val, m_desc, m_time])
+
+        rows.append(["", "", "", ""])
+
+        # Section 2: Morning Action Center (Actionable Opportunities Table)
+        rows.append(["--- TODAY'S ACTIONABLE OPPORTUNITIES (STRONG & RELEVANT MATCHES) ---", "", "", ""])
+        rows.append(DASHBOARD_ACTION_HEADERS)
+
+        actionable_jobs = dashboard_data.get("actionable_jobs", [])
+        resume_label = dashboard_data.get("resume_label", "Active Resume")
+
+        if actionable_jobs:
+            for job in actionable_jobs:
+                if hasattr(job, "match_level"):
+                    priority = "P1 - HIGH" if str(job.match_level.value).upper() == "STRONG" else "P2 - RELEVANT"
+                    title = job.title
+                    company = job.company
+                    match_level = job.match_level.value
+                    app_link = job.application_url or job.job_url
+                    missing = "; ".join(job.missing_improve) if job.missing_improve else "None"
+                    recruiter = job.recruiter_1 or "Pending discovery"
+                    status = job.application_status.value if hasattr(job, "application_status") else "NEW"
+                    ver_status = job.verification_status.value if hasattr(job, "verification_status") else "VERIFIED"
+                else:
+                    priority = "P1 - HIGH" if str(job.get("Match Level", "")).upper() == "STRONG" else "P2 - RELEVANT"
+                    title = str(job.get("Job Title", ""))
+                    company = str(job.get("Company", ""))
+                    match_level = str(job.get("Match Level", ""))
+                    app_link = str(job.get("Direct Application Link", "") or job.get("Job Link", ""))
+                    missing = str(job.get("Missing / Improve", "None"))
+                    recruiter = str(job.get("Recruiter 1", "Pending discovery"))
+                    status = str(job.get("Application Status", "NEW"))
+                    ver_status = str(job.get("Verification Status", "VERIFIED"))
+
+                rows.append([
+                    priority,
+                    title,
+                    company,
+                    match_level,
+                    app_link,
+                    resume_label,
+                    missing,
+                    recruiter,
+                    status,
+                    ver_status,
+                ])
+        elif is_error:
+            rows.append([
+                "PIPELINE ERROR",
+                "Discovery halted due to upstream failure.",
+                "Check System Status tab",
+                "N/A",
+                "N/A",
+                resume_label,
+                "Overnight run crashed. 0 jobs found does NOT mean 0 jobs available.",
+                "N/A",
+                "ERROR",
+                "UNVERIFIED",
+            ])
+        else:
+            rows.append([
+                "INFO",
+                "No new strong/relevant opportunities today.",
+                "All listings evaluated.",
+                "N/A",
+                "N/A",
+                resume_label,
+                "No skill gaps for today's evaluated batch.",
+                "N/A",
+                "N/A",
+                "UP_TO_DATE",
+            ])
+
+        # Write to worksheet
+        if hasattr(ws, "_data"):
+            ws._data = rows
+        else:
+            if hasattr(ws, "clear"):
+                try:
+                    ws.clear()
+                except Exception as e:
+                    logger.debug("Could not clear worksheet: %s", e)
+            for r in rows:
+                ws.append_row(r, value_input_option="USER_ENTERED")
+
+        # Format header row and alerts if format is available
+        try:
+            if is_error:
+                ws.format("A2:D2", {
+                    "textFormat": {"bold": True, "foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}},
+                    "backgroundColor": {"red": 0.8, "green": 0.1, "blue": 0.1},
+                })
+            else:
+                ws.format("A2:D2", {
+                    "textFormat": {"bold": True, "foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}},
+                    "backgroundColor": {"red": 0.1, "green": 0.5, "blue": 0.2},
+                })
+        except Exception as e:
+            logger.debug("Could not apply formatting to dashboard: %s", e)
+
+    def update_system_status_dashboard(
+        self,
+        spreadsheet_id: str,
+        system_data: dict[str, Any],
+    ) -> None:
+        """Populate the System Status tab with all mandatory metrics and audit trail.
+
+        Required Metrics:
+        - Pipeline status
+        - Last discovery
+        - Last verification
+        - Jobs discovered
+        - Jobs verified
+        - Strong matches
+        - Relevant matches
+        - Closed/rejected
+        - Source errors
+        """
+        client = self.manager.get_client()
+        sheet = client.open_by_key(spreadsheet_id)
+        ws = sheet.worksheet(TAB_SYSTEM_STATUS)
+
+        pipeline_status = system_data.get("pipeline_status", "OPERATIONAL")
+        is_error = pipeline_status == "PIPELINE ERROR" or bool(system_data.get("source_errors"))
+        status_label = "PIPELINE ERROR" if is_error else "OPERATIONAL"
+
+        rows: list[list[str]] = []
+        rows.append(SYSTEM_STATUS_HEADERS)
+
+        error_summary = (
+            "; ".join(str(e) for e in system_data.get("source_errors", []))
+            if system_data.get("source_errors")
+            else "None (All sources operational)"
+        )
+
+        metrics_map = [
+            ("Pipeline status", status_label, "CRITICAL ERROR" if is_error else "HEALTHY", datetime.now(UTC).isoformat(), "System operational health indicator"),
+            ("Last discovery", str(system_data.get("last_discovery", "N/A")), "COMPLETED" if not is_error else "FAILED", datetime.now(UTC).isoformat(), "Scheduled continuous discovery run"),
+            ("Last verification", str(system_data.get("last_verification", "N/A")), "COMPLETED", datetime.now(UTC).isoformat(), "Final morning recheck of primary candidates"),
+            ("Jobs discovered", str(system_data.get("jobs_discovered", 0)), "INFO", datetime.now(UTC).isoformat(), "Total raw/normalized jobs discovered"),
+            ("Jobs verified", str(system_data.get("jobs_verified", 0)), "HEALTHY", datetime.now(UTC).isoformat(), "Candidates passing active URL & substantive checks"),
+            ("Strong matches", str(system_data.get("strong_matches", 0)), "HIGH FIT", datetime.now(UTC).isoformat(), "Candidate matches meeting STRONG threshold"),
+            ("Relevant matches", str(system_data.get("relevant_matches", 0)), "ELIGIBLE", datetime.now(UTC).isoformat(), "Candidate matches meeting RELEVANT threshold"),
+            ("Closed/rejected", str(system_data.get("closed_or_expired", 0)), "FILTERED", datetime.now(UTC).isoformat(), "Jobs closed overnight (404/expired) or rejected"),
+            (
+                "Source errors",
+                str(len(system_data.get("source_errors", []))) if not is_error else f"ERRORS: {len(system_data.get('source_errors', []))}",
+                "ERROR" if is_error else "OK",
+                datetime.now(UTC).isoformat(),
+                error_summary,
+            ),
+        ]
+
+        for metric_name, val, level, ts, details in metrics_map:
+            rows.append([metric_name, str(val), ts, details, level])
+
+        # Write to worksheet
+        if hasattr(ws, "_data"):
+            ws._data = rows
+        else:
+            if hasattr(ws, "clear"):
+                try:
+                    ws.clear()
+                except Exception as e:
+                    logger.debug("Could not clear system status worksheet: %s", e)
+            for r in rows:
+                ws.append_row(r, value_input_option="USER_ENTERED")
+
+        # Format header
+        try:
+            ws.format("1:1", {
+                "textFormat": {"bold": True, "foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}},
+                "backgroundColor": {"red": 0.12, "green": 0.23, "blue": 0.36},
+                "horizontalAlignment": "CENTER",
+            })
+            if is_error:
+                ws.format("A2:E2", {
+                    "textFormat": {"bold": True, "foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}},
+                    "backgroundColor": {"red": 0.8, "green": 0.1, "blue": 0.1},
+                })
+        except Exception as e:
+            logger.debug("Could not format system status tab: %s", e)

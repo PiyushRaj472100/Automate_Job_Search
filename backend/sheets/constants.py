@@ -1,5 +1,7 @@
 """Constants, tab names, and header specifications for Google Sheets integration."""
 
+from enum import StrEnum
+
 # Sheet / Worksheet Tab Names
 TAB_DASHBOARD = "Dashboard"
 TAB_JOBS = "Jobs"
@@ -14,6 +16,24 @@ ALL_TABS = [
     TAB_APPLICATIONS,
     TAB_SYSTEM_STATUS,
 ]
+
+
+class ApplicationStatus(StrEnum):
+    """Job application lifecycle statuses supported in the operational spreadsheet."""
+
+    NEW = "NEW"
+    REVIEWED = "REVIEWED"
+    SAVED = "SAVED"
+    APPLIED = "APPLIED"
+    ASSESSMENT = "ASSESSMENT"
+    INTERVIEW = "INTERVIEW"
+    REJECTED = "REJECTED"
+    WITHDRAWN = "WITHDRAWN"
+    OFFER = "OFFER"
+    CLOSED = "CLOSED"
+
+
+APPLICATION_STATUS_VALUES = [s.value for s in ApplicationStatus]
 
 # Exact headers required by the engineering contract for Jobs sheet
 JOBS_HEADERS = [
@@ -46,12 +66,25 @@ JOBS_HEADERS = [
     "Notes",
 ]
 
-# Headers for Dashboard sheet
+# Headers for Dashboard sheet (KPI summary & morning action center)
 DASHBOARD_HEADERS = [
     "Metric",
     "Value",
     "Description",
     "Last Updated",
+]
+
+DASHBOARD_ACTION_HEADERS = [
+    "Priority",
+    "Job Title",
+    "Company",
+    "Match Level",
+    "Direct Application Link",
+    "Recommended Resume",
+    "Missing / Improve",
+    "Recruiter Profiles",
+    "Status",
+    "Verification Status",
 ]
 
 # Headers for Recruiters sheet
@@ -87,6 +120,18 @@ SYSTEM_STATUS_HEADERS = [
     "Last Verified",
     "Details",
     "Audit Log",
+]
+
+SYSTEM_STATUS_REQUIRED_METRICS = [
+    "Pipeline status",
+    "Last discovery",
+    "Last verification",
+    "Jobs discovered",
+    "Jobs verified",
+    "Strong matches",
+    "Relevant matches",
+    "Closed/rejected",
+    "Source errors",
 ]
 
 TAB_HEADERS_MAP = {

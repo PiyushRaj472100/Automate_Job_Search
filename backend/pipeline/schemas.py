@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from backend.matching.schemas import MatchLevel
 from backend.recruiter.schemas import ProfileVerificationResult, RecruiterStatus
+from backend.sheets.constants import ApplicationStatus
 from backend.verification.schemas import VerificationStatus
 
 
@@ -65,6 +66,7 @@ class PipelineJobOutput(BaseModel):
     recruiter_3: str = ""
     verified_recruiters: list[ProfileVerificationResult] = Field(default_factory=list)
     recruiter_status: RecruiterStatus = RecruiterStatus.NOT_FOUND
+    application_status: ApplicationStatus = ApplicationStatus.NEW
     sheet_row_index: int | None = None
 
     def to_sheet_row_dict(self, resume_label: str) -> dict[str, Any]:
@@ -93,7 +95,7 @@ class PipelineJobOutput(BaseModel):
             "Recruiter 1": self.recruiter_1,
             "Recruiter 2": self.recruiter_2,
             "Recruiter 3": self.recruiter_3,
-            "Application Status": "NOT_APPLIED",
+            "Application Status": self.application_status.value,
             "Applied Date": "",
             "Follow-up Date": "",
             "Notes": f"Experience note: {self.experience_assessment}",

@@ -10,11 +10,14 @@ from backend.models.resume import Resume
 from backend.sheets.client import GoogleSheetsAuthError, GoogleSheetsManager
 from backend.sheets.constants import (
     ALL_TABS,
+    APPLICATION_STATUS_VALUES,
     DASHBOARD_HEADERS,
     JOBS_HEADERS,
+    SYSTEM_STATUS_REQUIRED_METRICS,
     TAB_DASHBOARD,
     TAB_JOBS,
     TAB_SYSTEM_STATUS,
+    ApplicationStatus,
 )
 from backend.sheets.service import GoogleSheetsService
 
@@ -28,6 +31,9 @@ class MockWorksheet:
         self.cols_count = cols
         self._data: list[list[str]] = []
         self.frozen_rows = 0
+
+    def clear(self) -> None:
+        self._data = []
 
     def row_values(self, row_index: int) -> list[str]:
         if 1 <= row_index <= len(self._data):
@@ -293,3 +299,191 @@ def test_system_status_audit_logging(db_session: Session, mock_sheets_service: G
     assert len(status_records) == 1
     assert status_records[0]["Component"] == "URL Verifier"
     assert status_records[0]["Status"] == "HEALTHY"
+
+
+# 7. Application Status Support Test
+def test_application_status_enum_and_values():
+    """Verify that all 10 required application lifecycle statuses are properly supported."""
+    expected_statuses = [
+        "NEW",
+        "REVIEWED",
+        "SAVED",
+        "APPLIED",
+        "ASSESSMENT",
+        "INTERVIEW",
+        "REJECTED",
+        "WITHDRAWN",
+        "OFFER",
+        "CLOSED",
+    ]
+    for status_str in expected_statuses:
+        status_enum = ApplicationStatus(status_str)
+        assert status_enum.value == status_str
+        assert status_str in APPLICATION_STATUS_VALUES
+
+
+# 8. Daily Operational Dashboard (Morning Action Center) Test
+def test_daily_operational_dashboard_morning_action_center(
+    db_session: Session, mock_sheets_service: GoogleSheetsService
+):
+    """Verify that Dashboard immediately presents actionable jobs and operational KPIs on morning open."""
+    resume = Resume(file_name="actionable_dev.pdf", file_hash="hash_act1")
+    db_session.add(resume)
+    db_session.flush()
+
+    sheet_id, _ = mock_sheets_service.create_or_get_spreadsheet_for_resume(db_session, resume.id)
+
+    # Prepare actionable jobs
+    actionable_jobs = [
+        {
+            "Job Title": "Junior Python Engineer",
+            "Company": "CloudScale AI",
+            "Match Level": "STRONG",
+            "Direct Application Link": "https://cloudscale.ai/jobs/101/apply",
+            "Job Link": "https://cloudscale.ai/jobs/101",
+            "Missing / Improve": "Docker containerization",
+            "Recruiter 1": "Sarah Jenkins (Lead Recruiter)",
+            "Application Status": "NEW",
+            "Verification Status": "VERIFIED",
+        },
+        {
+            "Job Title": "Backend Developer",
+            "Company": "FinTech Core",
+            "Match Level": "RELEVANT",
+            "Direct Application Link": "https://fintechcore.io/careers/apply",
+            "Job Link": "https://fintechcore.io/careers",
+            "Missing / Improve": "None",
+            "Recruiter 1": "Alex Mercer (Talent Acquisition)",
+            "Application Status": "NEW",
+            "Verification Status": "VERIFIED",
+        },
+    ]
+
+    dashboard_data = {
+        "pipeline_status": "OPERATIONAL",
+        "last_discovery": "2026-09-28T05:00:00Z",
+        "last_verification": "2026-09-28T06:00:00Z",
+        "jobs_discovered": 15,
+        "jobs_verified": 12,
+        "strong_matches": 1,
+        "relevant_matches": 1,
+        "closed_or_expired": 3,
+        "source_errors": [],
+        "actionable_jobs": actionable_jobs,
+        "resume_label": "actionable_dev.pdf",
+    }
+
+    mock_sheets_service.update_dashboard_daily_view(sheet_id, dashboard_data)
+
+    client = mock_sheets_service.manager.get_client()
+    spreadsheet = client.open_by_key(sheet_id)
+    ws = spreadsheet.worksheet(TAB_DASHBOARD)
+    all_rows = ws.get_all_values()
+
+    # 1. Prominent Status Header
+    assert any("SYSTEM STATUS: OPERATIONAL" in cell for row in all_rows for cell in row)
+
+    # 2. Daily Operational Metrics Present
+    metrics_text = [row[0] for row in all_rows if len(row) > 0]
+    assert "Pipeline status" in metrics_text
+    assert "Last discovery" in metrics_text
+    assert "Last verification" in metrics_text
+    assert "Jobs discovered" in metrics_text
+    assert "Jobs verified" in metrics_text
+    assert "Strong matches" in metrics_text
+    assert "Relevant matches" in metrics_text
+    assert "Closed/rejected" in metrics_text
+    assert "Source errors" in metrics_text
+
+    # 3. Actionable Opportunities Section Present
+    flat_cells = [cell for row in all_rows for cell in row]
+    assert "Junior Python Engineer" in flat_cells
+    assert "CloudScale AI" in flat_cells
+    assert "STRONG" in flat_cells
+    assert "https://cloudscale.ai/jobs/101/apply" in flat_cells
+    assert "actionable_dev.pdf" in flat_cells
+    assert "Docker containerization" in flat_cells
+    assert "Sarah Jenkins (Lead Recruiter)" in flat_cells
+
+
+# 9. Overnight Pipeline Failure & Error Alert Test
+def test_daily_operational_dashboard_overnight_failure_alert(
+    db_session: Session, mock_sheets_service: GoogleSheetsService
+):
+    """Verify that if pipeline failed overnight, Dashboard prominently displays PIPELINE ERROR
+
+    and alerts that 0 jobs found does NOT mean 0 jobs available.
+    """
+    resume = Resume(file_name="error_test.pdf", file_hash="hash_err1")
+    db_session.add(resume)
+    db_session.flush()
+
+    sheet_id, _ = mock_sheets_service.create_or_get_spreadsheet_for_resume(db_session, resume.id)
+
+    dashboard_data = {
+        "pipeline_status": "PIPELINE ERROR",
+        "last_discovery": "2026-09-28T03:00:00Z",
+        "last_verification": "2026-09-28T03:01:00Z",
+        "jobs_discovered": 0,
+        "jobs_verified": 0,
+        "strong_matches": 0,
+        "relevant_matches": 0,
+        "closed_or_expired": 0,
+        "source_errors": ["ConnectionRefusedError: Arbeitnow API timeout after 3 retries."],
+        "actionable_jobs": [],
+        "resume_label": "error_test.pdf",
+    }
+
+    mock_sheets_service.update_dashboard_daily_view(sheet_id, dashboard_data)
+
+    client = mock_sheets_service.manager.get_client()
+    spreadsheet = client.open_by_key(sheet_id)
+    ws = spreadsheet.worksheet(TAB_DASHBOARD)
+    all_rows = ws.get_all_values()
+    flat_cells = [cell for row in all_rows for cell in row]
+
+    # Must prominently state PIPELINE ERROR
+    assert any("PIPELINE ERROR" in cell for cell in flat_cells)
+
+    # Must explicitly inform user that 0 jobs does NOT mean 0 jobs found
+    assert any("0 new jobs reflects a system failure, NOT a lack of available opportunities" in cell for cell in flat_cells)
+
+
+# 10. System Status Tab Required Metrics Test
+def test_system_status_tab_all_required_metrics(db_session: Session, mock_sheets_service: GoogleSheetsService):
+    """Verify that System Status tab presents all 9 required metrics and status levels."""
+    resume = Resume(file_name="sys_status.pdf", file_hash="hash_sys1")
+    db_session.add(resume)
+    db_session.flush()
+
+    sheet_id, _ = mock_sheets_service.create_or_get_spreadsheet_for_resume(db_session, resume.id)
+
+    system_data = {
+        "pipeline_status": "OPERATIONAL",
+        "last_discovery": "2026-09-28 05:00:00 UTC",
+        "last_verification": "2026-09-28 06:00:00 UTC",
+        "jobs_discovered": 25,
+        "jobs_verified": 20,
+        "strong_matches": 4,
+        "relevant_matches": 6,
+        "closed_or_expired": 5,
+        "source_errors": [],
+    }
+
+    mock_sheets_service.update_system_status_dashboard(sheet_id, system_data)
+
+    client = mock_sheets_service.manager.get_client()
+    spreadsheet = client.open_by_key(sheet_id)
+    ws = spreadsheet.worksheet(TAB_SYSTEM_STATUS)
+    records = ws.get_all_records()
+
+    # Verify all 9 required metrics are present
+    recorded_metrics = [r["Component"] for r in records]
+    for required_metric in SYSTEM_STATUS_REQUIRED_METRICS:
+        assert required_metric in recorded_metrics, f"Missing required system metric: '{required_metric}'"
+
+    # Verify pipeline status value is OPERATIONAL
+    status_row = next(r for r in records if r["Component"] == "Pipeline status")
+    assert status_row["Status"] == "OPERATIONAL"
+    assert status_row["Audit Log"] == "HEALTHY"
+

@@ -452,6 +452,60 @@ class ContinuousScheduler:
 
                     summary.sheet_rows_updated = len(sheet_rows)
                     logger.info("Updated Google Sheet with %d morning verified jobs.", len(sheet_rows))
+
+                    # Update Dashboard Tab (Morning Action Center)
+                    is_pipeline_error = bool(summary.errors)
+                    pipeline_status_str = "PIPELINE ERROR" if is_pipeline_error else "OPERATIONAL"
+
+                    last_disc = (
+                        max(self._source_watermarks.values()).isoformat()
+                        if self._source_watermarks
+                        else datetime.now(UTC).isoformat()
+                    )
+                    last_ver = (
+                        summary.completed_at.isoformat()
+                        if summary.completed_at
+                        else datetime.now(UTC).isoformat()
+                    )
+
+                    dashboard_payload = {
+                        "pipeline_status": pipeline_status_str,
+                        "last_discovery": last_disc,
+                        "last_verification": last_ver,
+                        "jobs_discovered": summary.candidates_rechecked,
+                        "jobs_verified": summary.still_verified,
+                        "strong_matches": sum(
+                            1 for j in verified_outputs if j.match_level == MatchLevel.STRONG
+                        ),
+                        "relevant_matches": sum(
+                            1 for j in verified_outputs if j.match_level == MatchLevel.RELEVANT
+                        ),
+                        "closed_or_expired": summary.closed_or_expired,
+                        "source_errors": summary.errors,
+                        "actionable_jobs": verified_outputs,
+                        "resume_label": resume.file_name or "Resume",
+                    }
+                    self.sheets_service.update_dashboard_daily_view(
+                        spreadsheet_id=resume.spreadsheet_id,
+                        dashboard_data=dashboard_payload,
+                    )
+
+                    # Update System Status Tab
+                    system_payload = {
+                        "pipeline_status": pipeline_status_str,
+                        "last_discovery": last_disc,
+                        "last_verification": last_ver,
+                        "jobs_discovered": summary.candidates_rechecked,
+                        "jobs_verified": summary.still_verified,
+                        "strong_matches": dashboard_payload["strong_matches"],
+                        "relevant_matches": dashboard_payload["relevant_matches"],
+                        "closed_or_expired": summary.closed_or_expired,
+                        "source_errors": summary.errors,
+                    }
+                    self.sheets_service.update_system_status_dashboard(
+                        spreadsheet_id=resume.spreadsheet_id,
+                        system_data=system_payload,
+                    )
                 except Exception as exc:
                     logger.warning("Google Sheet sync failed or skipped: %s", exc)
                     summary.errors.append(str(exc))
