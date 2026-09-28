@@ -218,8 +218,47 @@ def generate_verified_linkedin_links(company: str, location: str = "Bengaluru") 
     )
 
 
+def parse_recruiter_post_date(raw: str) -> datetime:
+    """
+    Parses human posting strings like '45 minutes ago', '2 hours ago', '1 day ago'
+    into an actual UTC datetime for exact recency ranking and filtering.
+    """
+    if not raw:
+        return datetime.now(timezone.utc)
+    raw_low = raw.lower().strip()
+    now = datetime.now(timezone.utc)
+
+    if any(k in raw_low for k in ["just now", "today", "few seconds", "past 24h", "recent"]):
+        return now
+    if "yesterday" in raw_low:
+        return now - timedelta(days=1)
+
+    m_mo = re.search(r"\b(\d+)\s*(?:months?|mos?)\b", raw_low)
+    if m_mo:
+        return now - timedelta(days=int(m_mo.group(1)) * 30)
+
+    m_wk = re.search(r"\b(\d+)\s*(?:weeks?|wks?|w)\b", raw_low)
+    if m_wk:
+        return now - timedelta(days=int(m_wk.group(1)) * 7)
+
+    m_day = re.search(r"\b(\d+)\s*(?:days?|d)\b", raw_low)
+    if m_day:
+        return now - timedelta(days=int(m_day.group(1)))
+
+    m_hr = re.search(r"\b(\d+)\s*(?:hours?|hrs?|h)\b", raw_low)
+    if m_hr:
+        return now - timedelta(hours=int(m_hr.group(1)))
+
+    m_min = re.search(r"\b(\d+)\s*(?:mins?|minutes?|m)\b", raw_low)
+    if m_min:
+        return now - timedelta(minutes=int(m_min.group(1)))
+
+    return now
+
+
 async def hunt_jobs_for_resume(resume_id: str) -> dict:
     log.info("Starting high-precision Indian tech job hunt for resume %s", resume_id)
+    now_utc = datetime.now(timezone.utc)
     async with SessionLocal() as db:
         resume = await db.get(Resume, resume_id)
         if not resume:
@@ -227,7 +266,7 @@ async def hunt_jobs_for_resume(resume_id: str) -> dict:
             return {"status": "error", "message": "Resume not found"}
 
         # Auto-prune jobs older than 4 days in DB to ensure freshness
-        cutoff = datetime.now(timezone.utc) - timedelta(days=4)
+        cutoff = now_utc - timedelta(days=4)
         try:
             await db.execute(delete(Job).where(Job.created_at < cutoff))
             await db.commit()
@@ -285,13 +324,20 @@ async def hunt_jobs_for_resume(resume_id: str) -> dict:
                 continue
             seen_urls.add(url)
 
+            # Recruiter post age filter: Drop jobs posted > 4 days ago
+            post_dt = parse_recruiter_post_date(j.posted_at or "")
+            age_days = (now_utc - post_dt).total_seconds() / 86400.0
+            if age_days > 4.0:
+                continue
+
             suitable, score = is_suitable_job(j.title, j.description or "", j.location or "")
             if suitable:
-                scored_jobs.append((score, j))
+                # Rank by recruiter posting datetime DESCENDING (newest on top), then location score
+                scored_jobs.append((post_dt, score, j))
 
-        # Sort jobs by location priority (Bangalore 100 first, then Indian metros 85, then Remote)
-        scored_jobs.sort(key=lambda x: x[0], reverse=True)
-        sorted_jobs = [j for _, j in scored_jobs]
+        # Sort jobs by recruiter post time (e.g., 1 hour ago before 1 day ago), then Bangalore priority
+        scored_jobs.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        sorted_jobs = [j for _, _, j in scored_jobs]
 
         # Fetch existing job URLs in DB for this resume
         existing_res = await db.execute(select(Job.dedup_key).where(Job.resume_id == resume_id))
@@ -329,6 +375,7 @@ async def hunt_jobs_for_resume(resume_id: str) -> dict:
                 work_mode = "Work from Office"
 
             referral_links = generate_verified_linkedin_links(j.company, location="Bengaluru")
+            post_dt = parse_recruiter_post_date(j.posted_at or "")
 
             db_job = Job(
                 resume_id=resume.id,
@@ -341,6 +388,8 @@ async def hunt_jobs_for_resume(resume_id: str) -> dict:
                 work_mode=work_mode,
                 job_url=j.job_url,
                 description=j.description,
+                posted_at=j.posted_at or "Recent (Past 24h)",
+                first_seen_at=post_dt,
                 status="ACTIVE",
             )
             db.add(db_job)

@@ -41,6 +41,12 @@ def _format_job(j: Job) -> dict:
     comp_encoded = comp.replace(" ", "%20")
     loc = j.location or "Not specified"
     is_blr = "bangalore" in loc.lower() or "bengaluru" in loc.lower()
+
+    # Recruiter post time display: prioritize exact post string (e.g. 2h ago, 45m ago) or formatted post date
+    time_display = _format_time_ago(j.first_seen_at or j.created_at)
+    if j.posted_at and any(k in j.posted_at.lower() for k in ["ago", "just now", "today", "yesterday"]):
+        time_display = j.posted_at
+
     return {
         "id": j.id,
         "resume_id": j.resume_id,
@@ -56,7 +62,8 @@ def _format_job(j: Job) -> dict:
         "status": j.status,
         "application_status": j.application_status,
         "created_at": j.created_at.isoformat() if j.created_at else None,
-        "time_ago": _format_time_ago(j.created_at),
+        "recruiter_posted_at": j.first_seen_at.isoformat() if j.first_seen_at else (j.created_at.isoformat() if j.created_at else None),
+        "time_ago": time_display,
         "linkedin_recruiter_url": f"https://www.linkedin.com/search/results/people/?keywords={comp_encoded}%20technical%20recruiter%20Bengaluru" if comp else None,
         "linkedin_manager_url": f"https://www.linkedin.com/search/results/people/?keywords={comp_encoded}%20%22engineering%20manager%22%20Bengaluru" if comp else None,
         "linkedin_referral_url": f"https://www.linkedin.com/search/results/people/?keywords={comp_encoded}%20%22software%20engineer%22%20Bengaluru" if comp else None,
@@ -76,7 +83,9 @@ async def list_jobs(
 ):
     # Auto-exclude jobs older than 4 days
     cutoff = datetime.now(timezone.utc) - timedelta(days=4)
-    query = select(Job).where(Job.created_at >= cutoff)
+    query = select(Job).where(
+        (Job.first_seen_at >= cutoff) | ((Job.first_seen_at.is_(None)) & (Job.created_at >= cutoff))
+    )
 
     if q:
         query = query.where(Job.title.ilike(f"%{q}%") | Job.company.ilike(f"%{q}%"))
@@ -94,16 +103,16 @@ async def list_jobs(
 
     # Sorting
     if sort_by == "bangalore":
-        # Bangalore first, then latest
+        # Bangalore first, then latest recruiter posting
         blr_priority = case(
             (Job.location.ilike("%bangalore%"), 1),
             (Job.location.ilike("%bengaluru%"), 1),
             else_=2
         )
-        query = query.order_by(blr_priority, Job.created_at.desc())
+        query = query.order_by(blr_priority, Job.first_seen_at.desc().nullslast(), Job.created_at.desc())
     else:
-        # Default: latest jobs first (within 1 hr, past 24h, etc.)
-        query = query.order_by(Job.created_at.desc())
+        # Default: latest recruiter posting first (e.g. 1 hour ago before 1 day ago)
+        query = query.order_by(Job.first_seen_at.desc().nullslast(), Job.created_at.desc())
 
     query = query.limit(limit).offset(offset)
     rows = (await db.execute(query)).scalars().all()

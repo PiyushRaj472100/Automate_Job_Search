@@ -113,7 +113,7 @@ export function Jobs() {
                 <span className="font-semibold text-white text-base">{j.title}</span>
                 {/* Recency Badge */}
                 <span className="rounded bg-sky-500/20 border border-sky-500/30 px-2 py-0.5 text-[11px] text-sky-300 font-medium">
-                  🕒 {j.time_ago || "Recent"}
+                  🕒 Posted: {j.time_ago || "Recent"}
                 </span>
                 {/* Fresher Badge */}
                 <span className="rounded bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[11px] text-emerald-300 font-medium">

@@ -106,6 +106,7 @@ class Job(Base):
     job_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     application_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    posted_at: Mapped[str | None] = mapped_column(String(100), nullable=True)
     status: Mapped[str] = mapped_column(String(64), default="ACTIVE")
     verification_status: Mapped[str] = mapped_column(String(64), default="NOT_VERIFIED")
     application_status: Mapped[str] = mapped_column(String(64), default="NEW")
