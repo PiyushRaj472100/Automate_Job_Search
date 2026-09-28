@@ -67,39 +67,54 @@ class GeminiResumeExtractor:
             logger.warning("GEMINI_API_KEY is not configured. Running deterministic rule-based extractor.")
             return self._fallback_deterministic_extract(cleaned_text)
 
-        try:
-            import google.generativeai as genai
+        import time
 
-            genai.configure(api_key=self.api_key)
-            model = genai.GenerativeModel(
-                model_name=self.model_name,
-                system_instruction=EXTRACTION_SYSTEM_INSTRUCTION,
-                generation_config={
-                    "response_mime_type": "application/json",
-                    "temperature": 0.0,
-                },
-            )
+        max_retries = 3
+        last_error = None
 
-            prompt = EXTRACTION_PROMPT_TEMPLATE.format(resume_text=cleaned_text)
-            response = model.generate_content(prompt)
+        for attempt in range(1, max_retries + 1):
+            try:
+                import google.generativeai as genai
 
-            if not response or not response.text:
-                raise ResumeExtractionError("Empty response received from Gemini API.")
+                genai.configure(api_key=self.api_key)
+                model = genai.GenerativeModel(
+                    model_name=self.model_name,
+                    system_instruction=EXTRACTION_SYSTEM_INSTRUCTION,
+                    generation_config={
+                        "response_mime_type": "application/json",
+                        "temperature": 0.0,
+                    },
+                )
 
-            raw_json_str = response.text.strip()
-            # Remove any stray code fences if model output them
-            if raw_json_str.startswith("```"):
-                raw_json_str = raw_json_str.strip("`")
-                if raw_json_str.startswith("json"):
-                    raw_json_str = raw_json_str[4:].strip()
+                prompt = EXTRACTION_PROMPT_TEMPLATE.format(resume_text=cleaned_text)
+                response = model.generate_content(prompt)
 
-            return self.validate_extraction_json(raw_json_str)
+                if not response or not response.text:
+                    raise ResumeExtractionError("Empty response received from Gemini API.")
 
-        except ResumeExtractionError:
-            raise
-        except Exception as e:
-            logger.error("Gemini API extraction failed: %s", e)
-            raise ResumeExtractionError(f"Gemini API extraction failed: {e}") from e
+                raw_json_str = response.text.strip()
+                # Remove any stray code fences if model output them
+                if raw_json_str.startswith("```"):
+                    raw_json_str = raw_json_str.strip("`")
+                    if raw_json_str.startswith("json"):
+                        raw_json_str = raw_json_str[4:].strip()
+
+                return self.validate_extraction_json(raw_json_str)
+
+            except ResumeExtractionError as e:
+                last_error = e
+                logger.warning("AI extraction schema validation failed on attempt %d/%d: %s", attempt, max_retries, e)
+                if attempt == max_retries:
+                    raise
+                time.sleep(1.0 * attempt)
+            except Exception as e:
+                last_error = e
+                logger.warning("Gemini API call failed on attempt %d/%d: %s", attempt, max_retries, e)
+                if attempt == max_retries:
+                    raise ResumeExtractionError(f"Gemini API extraction failed after {max_retries} attempts: {e}") from e
+                time.sleep(1.5 * attempt)
+
+        raise ResumeExtractionError(f"Gemini API extraction failed: {last_error}")
 
     @staticmethod
     def validate_extraction_json(json_str_or_dict: str | dict[str, Any]) -> StructuredResumeExtraction:

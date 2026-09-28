@@ -201,17 +201,25 @@ class RecruiterFinder:
         return candidates
 
     def _deduplicate_candidates(self, candidates: list[RawCandidateProfile]) -> list[RawCandidateProfile]:
-        """Deduplicate candidates by lowercased name or linkedin url."""
-        seen_keys: set[str] = set()
-        deduped: list[RawCandidateProfile] = []
+        """Deduplicate candidates by lowercased name, merging richer profile data (e.g. LinkedIn URL)."""
+        deduped_by_name: dict[str, RawCandidateProfile] = {}
 
         for c in candidates:
-            key = (c.name.strip().lower(), (c.linkedin_url or "").strip().lower())
             name_key = c.name.strip().lower()
-            if key in seen_keys or name_key in seen_keys:
+            if not name_key:
                 continue
-            seen_keys.add(key)
-            seen_keys.add(name_key)
-            deduped.append(c)
+            if name_key not in deduped_by_name:
+                deduped_by_name[name_key] = c
+            else:
+                existing = deduped_by_name[name_key]
+                # If new entry has a LinkedIn URL and existing does not, merge to create complete candidate
+                if not existing.linkedin_url and c.linkedin_url:
+                    merged_dict = existing.model_dump()
+                    merged_dict.update({k: v for k, v in c.model_dump().items() if v is not None and v != ""})
+                    deduped_by_name[name_key] = RawCandidateProfile(**merged_dict)
+                elif c.claimed_job_ownership and not existing.claimed_job_ownership:
+                    existing.claimed_job_ownership = True
+                    if c.evidence_text:
+                        existing.evidence_text = c.evidence_text
 
-        return deduped
+        return list(deduped_by_name.values())
