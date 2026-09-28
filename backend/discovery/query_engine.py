@@ -133,8 +133,8 @@ class SearchQueryEngine:
         if not base_role:
             base_role = primary_role
 
-        # Strategy 1: Primary Role + Entry-Level Keywords (e.g. "Junior Backend Engineer", "Software Engineer Fresher")
-        for term in ["junior", "fresher", "entry level", "graduate", "0-2 years"]:
+        # Strategy 1: Primary Role + Core Entry-Level Keywords
+        for term in ["junior", "fresher", "entry level"]:
             add_query(
                 text=f"{term.title()} {base_role}",
                 role=primary_role,
@@ -142,48 +142,10 @@ class SearchQueryEngine:
                 level=term,
             )
 
-        # Strategy 2: Alternate Target Roles + Junior/Entry Level
-        for alt_role in roles[1:3]:
-            alt_base = alt_role
-            for prefix in ["junior", "fresher", "entry level", "entry-level", "graduate", "associate"]:
-                if alt_base.lower().startswith(prefix):
-                    alt_base = alt_base[len(prefix):].strip()
-            add_query(
-                text=f"Junior {alt_base or alt_role}",
-                role=alt_role,
-                used_skills=[],
-                level="junior",
-            )
-
-        # Strategy 3: Role + Primary Technical Skill
-        for skill in top_skills[:2]:
-            add_query(
-                text=f"{skill} {primary_role}",
-                role=primary_role,
-                used_skills=[skill],
-                level="entry_level",
-            )
-
-        # Strategy 4: Role + Primary Skill + Entry-Level Qualifier (e.g. "Python Backend Engineer Junior")
-        if top_skills:
-            primary_skill = top_skills[0]
-            add_query(
-                text=f"{primary_skill} {primary_role} Junior",
-                role=primary_role,
-                used_skills=[primary_skill],
-                level="junior",
-            )
-            add_query(
-                text=f"{primary_skill} {primary_role} 0-2 years",
-                role=primary_role,
-                used_skills=[primary_skill],
-                level="0-2 years",
-            )
-
-        # Strategy 5: Remote Exploration
+        # Strategy 2: Remote Exploration (if candidate prefers remote)
         if "remote" in [m.lower() for m in work_modes]:
             add_query(
-                text=f"Remote Junior {primary_role}",
+                text=f"Remote Junior {base_role}",
                 role=primary_role,
                 used_skills=[],
                 level="junior",
@@ -198,7 +160,7 @@ class SearchQueryEngine:
                     mode="remote",
                 )
 
-        # Strategy 6: Geographic Location Specific Searches
+        # Strategy 3: Geographic Location Specific Searches (if candidate specified locations)
         for loc in locations[:2]:
             add_query(
                 text=f"{primary_role} {loc} Fresher",
@@ -207,6 +169,39 @@ class SearchQueryEngine:
                 level="fresher",
                 loc=loc,
             )
+
+        # Strategy 4: Role + Primary Technical Skill
+        for skill in top_skills[:2]:
+            add_query(
+                text=f"{skill} {base_role} Junior",
+                role=primary_role,
+                used_skills=[skill],
+                level="junior",
+            )
+
+        # Strategy 5: Alternate Target Roles + Junior/Entry Level
+        for alt_role in roles[1:3]:
+            alt_base = alt_role
+            for prefix in ["junior", "fresher", "entry level", "entry-level", "graduate", "associate"]:
+                if alt_base.lower().startswith(prefix):
+                    alt_base = alt_base[len(prefix):].strip()
+            add_query(
+                text=f"Junior {alt_base or alt_role}",
+                role=alt_role,
+                used_skills=[],
+                level="junior",
+            )
+
+        # Strategy 6: Additional Entry-Level Keywords (Graduate, 0-2 years)
+        for term in ["graduate", "0-2 years"]:
+            add_query(
+                text=f"{term.title()} {base_role}",
+                role=primary_role,
+                used_skills=[],
+                level=term,
+            )
+
+
 
         # Strategy 7: Secondary skill combinations if available
         if len(top_skills) >= 2:
