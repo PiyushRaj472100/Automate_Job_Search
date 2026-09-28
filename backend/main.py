@@ -74,11 +74,13 @@ def create_application() -> FastAPI:
 
     # Mount direct routes at root level: GET /health, /resumes, /resumes/{id}/sheets
     app.include_router(health_router)
+    from backend.api.routes.discovery import router as discovery_router
     from backend.api.routes.resumes import router as resumes_router
     from backend.api.routes.sheets import router as sheets_router
 
     app.include_router(resumes_router)
     app.include_router(sheets_router)
+    app.include_router(discovery_router)
 
     # Mount versioned API routes: /api/v1/...
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)

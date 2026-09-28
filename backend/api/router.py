@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from backend.api.routes import health, resumes, sheets
+from backend.api.routes import discovery, health, resumes, sheets
 
 api_router = APIRouter()
 
@@ -10,3 +10,5 @@ api_router = APIRouter()
 api_router.include_router(health.router)
 api_router.include_router(resumes.router)
 api_router.include_router(sheets.router)
+api_router.include_router(discovery.router)
+

@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 
 from backend.core.config import get_settings
 from backend.sheets.client import GoogleSheetsAuthError, GoogleSheetsManager
-
 from backend.sheets.constants import (
     ALL_TABS,
     JOBS_HEADERS,
