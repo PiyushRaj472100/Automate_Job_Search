@@ -41,6 +41,17 @@ app = FastAPI(title=s.PROJECT_NAME, version=s.VERSION, lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=s.cors_list, allow_methods=["*"], allow_headers=["*"])
 
 
+@app.get("/")
+async def root():
+    return {
+        "status": "online",
+        "service": s.PROJECT_NAME,
+        "version": s.VERSION,
+        "docs_url": "/docs",
+        "health_check": "/health",
+    }
+
+
 @app.exception_handler(SQLAlchemyError)
 @app.exception_handler(OSError)
 async def db_down(request: Request, exc: Exception):
