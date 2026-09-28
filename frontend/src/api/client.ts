@@ -151,3 +151,35 @@ export const getSettings = () => req<{
 }>("/settings");
 export const updateSettings = (data: { google_sheet_url?: string; gemini_api_key?: string; share_email?: string }) =>
   req<{ status: string; message: string; google_sheet_url: string }>("/settings", json(data, "PATCH"));
+
+// Referral Finder (JD Analyzer)
+export interface ReferralAnalysis {
+  id: string;
+  company: string;
+  role: string;
+  location: string;
+  detected_skills: string[];
+  search_links: Array<{
+    category: string;
+    title: string;
+    url: string;
+    purpose: string;
+  }>;
+  email_formats: Array<{
+    pattern: string;
+    example: string;
+    usage: string;
+  }>;
+  outreach_template: string;
+  created_at: string;
+}
+
+export const analyzeReferralJD = (data: {
+  company: string;
+  role: string;
+  location?: string;
+  job_description?: string;
+}) => req<ReferralAnalysis>("/referrals/analyze", json(data));
+
+export const getReferralHistory = () => req<ReferralAnalysis[]>("/referrals/history");
+

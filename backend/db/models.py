@@ -312,3 +312,18 @@ class ErrorEvent(Base):
     stack_trace: Mapped[str | None] = mapped_column(Text, nullable=True)
     context: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ReferralSearch(Base):
+    __tablename__ = "referral_searches"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    company: Mapped[str] = mapped_column(String(255), index=True)
+    role: Mapped[str] = mapped_column(String(255))
+    location: Mapped[str] = mapped_column(String(255), default="Bengaluru, India")
+    job_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detected_skills: Mapped[list] = mapped_column(JSON, default=list)
+    search_links: Mapped[list] = mapped_column(JSON, default=list)
+    email_formats: Mapped[list] = mapped_column(JSON, default=list)
+    outreach_template: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+

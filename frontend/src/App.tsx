@@ -7,14 +7,16 @@ import { Recruiters } from "./pages/Recruiters";
 import { Applications } from "./pages/Applications";
 import { System } from "./pages/System";
 import { Settings } from "./pages/Settings";
+import { ReferralFinder } from "./pages/ReferralFinder";
 
 const nav = [
   { path: "dashboard", label: "Dashboard", icon: "📊" },
   { path: "resumes", label: "Resumes", icon: "📄" },
-  { path: "discovery", label: "Discovery", icon: "🔍" },
+  { path: "referrals", label: "Referral Finder", icon: "🤝" },
   { path: "jobs", label: "Jobs", icon: "💼" },
   { path: "recruiters", label: "Recruiters", icon: "👥" },
   { path: "applications", label: "Applications", icon: "📝" },
+  { path: "discovery", label: "Discovery", icon: "🔍" },
   { path: "system", label: "System", icon: "⚙️" },
   { path: "settings", label: "Settings", icon: "🔧" },
 ];
@@ -46,6 +48,7 @@ export default function App() {
           <Route path="/" element={<Navigate to="/dashboard" />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/resumes" element={<Resumes />} />
+          <Route path="/referrals" element={<ReferralFinder />} />
           <Route path="/discovery" element={<Discovery />} />
           <Route path="/jobs" element={<Jobs />} />
           <Route path="/recruiters" element={<Recruiters />} />

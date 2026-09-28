@@ -8,7 +8,7 @@ from backend.core.config import get_settings
 from backend.core.logging import setup_logging
 from backend.db.database import Base, engine
 from backend.api.routes import (
-    health, resumes, discovery, dashboard, jobs, recruiters, applications, settings as settings_route
+    health, resumes, discovery, dashboard, jobs, recruiters, applications, settings as settings_route, referrals
 )
 
 s = get_settings()  # fails fast if DATABASE_URL is missing
@@ -74,3 +74,4 @@ for prefix in ("", s.API_V1_PREFIX):
     app.include_router(recruiters.router, prefix=prefix)
     app.include_router(applications.router, prefix=prefix)
     app.include_router(settings_route.router, prefix=prefix)
+    app.include_router(referrals.router, prefix=prefix)
