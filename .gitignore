@@ -40,6 +40,8 @@ env/
 *.key
 credentials*.json
 service_account*.json
+credentials/
+
 
 # Unit test / coverage reports
 htmlcov/

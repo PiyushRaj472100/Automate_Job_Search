@@ -68,10 +68,20 @@ class Settings(BaseSettings):
         default=None,
         description="Google Gemini API key for matching & extraction (Planned for Phase 3)",
     )
-    GOOGLE_SHEETS_SPREADSHEET_ID: str | None = Field(
+    # Google Sheets Integration
+    GOOGLE_SERVICE_ACCOUNT_FILE: str | None = Field(
         default=None,
-        description="Target Google Sheets ID for operational reporting (Planned for Phase 5)",
+        description="Path to Google Service Account JSON credentials file",
     )
+    GOOGLE_SERVICE_ACCOUNT_JSON: str | None = Field(
+        default=None,
+        description="Raw Google Service Account JSON string",
+    )
+    GOOGLE_SHEETS_SHARE_USER_EMAIL: str | None = Field(
+        default=None,
+        description="User email to automatically share created sheets with (Editor permission)",
+    )
+
 
     @property
     def database_url_async(self) -> str:

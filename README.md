@@ -161,6 +161,20 @@ alembic upgrade head
 
 ---
 
+## Google Sheets Integration (Dashboard per Resume)
+
+Every resume profile automatically maps to its own dedicated 5-tab Google Sheet (`Dashboard`, `Jobs`, `Recruiters`, `Applications`, `System Status`), with exact 27-column job headers.
+
+To configure Google Sheets and verify live connectivity:
+1. Review setup guide: [docs/GOOGLE_SHEETS_SETUP.md](docs/GOOGLE_SHEETS_SETUP.md)
+2. Place your service account JSON in `credentials/service_account.json`
+3. Run the live verification utility:
+   ```bash
+   python scripts/verify_sheets.py
+   ```
+
+---
+
 ## Running Tests and Linting
 
 ### Running Pytest
@@ -184,9 +198,11 @@ ruff check .
 
 - [x] **Phase 0: Foundation & Engineering Contract** *(Completed)*
 - [x] **Phase 1: System of Record & Database Schemas** *(Completed)*
-- [ ] **Phase 2: Multi-Resume Profile Ingestion**
+- [x] **Phase 2: Multi-Resume Profile Ingestion** *(Completed)*
+- [x] **Sheets Integration: Google Sheets Dashboard per Resume** *(Completed)*
 - [ ] **Phase 3: Source Discovery & Collector Framework**
 - [ ] **Phase 4: Gemini Matching & Deterministic Verification**
-- [ ] **Phase 5: Public Recruiter Discovery & Google Sheets Integration**
+- [ ] **Phase 5: Public Recruiter Discovery & Contact Verification**
 - [ ] **Phase 6: Cloud Deployment & Daily Morning Orchestration**
+
 

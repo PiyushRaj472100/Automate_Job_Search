@@ -24,6 +24,8 @@ class Resume(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     file_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    spreadsheet_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    spreadsheet_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Relationships
     profiles: Mapped[list["ResumeProfile"]] = relationship(
@@ -56,8 +58,11 @@ class ResumeProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     min_salary: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_experience_years: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     sheet_tab_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    spreadsheet_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    spreadsheet_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     structured_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
 
 
     # Relationships
