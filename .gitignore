@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+credentials/
+backend/credentials/
+*service_account*.json
+__pycache__/
+*.pyc
+.pgdata/
+node_modules/
+dist/
+.pytest_cache/
+.DS_Store
+
