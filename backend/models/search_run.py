@@ -36,6 +36,11 @@ class SearchRun(Base, UUIDPrimaryKeyMixin):
         default="discovery",
         nullable=False,
     )  # discovery, liveness_check, morning_report, manual
+    source: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )  # Specific source name e.g. "arbeitnow", or "all"
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
