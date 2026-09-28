@@ -1,3 +1,4 @@
+import re
 import urllib.parse
 import httpx
 from bs4 import BeautifulSoup
@@ -58,6 +59,37 @@ class LinkedInIndiaSource(SourceAdapter):
                 if not job_url.startswith("http"):
                     continue
 
+                # Fetch real full Job Description from LinkedIn API for verified experience analysis
+                jd_text = ""
+                m = re.search(r'-(\d+)(?:\?|$)', job_url)
+                if m:
+                    jid = m.group(1)
+                    try:
+                        jd_resp = await client.get(f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{jid}", timeout=5)
+                        if jd_resp.status_code == 200:
+                            s_jd = BeautifulSoup(jd_resp.text, "html.parser")
+                            desc_div = s_jd.find("div", class_="show-more-less-html__markup")
+                            if desc_div:
+                                jd_text = desc_div.get_text(separator=" ", strip=True)
+
+                            # Check criteria for senior/mid level
+                            for crit in s_jd.find_all("li", class_="description__job-criteria-item"):
+                                sub = crit.find("h3", class_="description__job-criteria-subheader")
+                                val = crit.find("span", class_="description__job-criteria-text")
+                                if sub and val and "seniority" in sub.get_text(strip=True).lower():
+                                    val_text = val.get_text(strip=True).lower()
+                                    if "mid-senior" in val_text or "director" in val_text or "executive" in val_text:
+                                        jd_text = "REJECT_SENIOR_LEVEL"
+                    except Exception:
+                        pass
+
+                if not jd_text or jd_text == "REJECT_SENIOR_LEVEL":
+                    continue
+
+                # Reject if JD requires 3+ years or senior experience
+                if re.search(r"\b(([3-9]|\d{2,})\s*(\+|-\s*\d+)?\s*(?:to\s*\d+\s*)?(?:years?|yrs?)|[2-9]\s*[-–to]+\s*[3-9]\s*(?:years?|yrs?)|2\s*to\s*[3-9]\s*(?:years?|yrs?)|minimum\s+([3-9]|\d{2,})\s*(?:years?|yrs?)|at\s+least\s+([3-9]|\d{2,})\s*(?:years?|yrs?)|[3-9]\+\s*(?:years?|yrs?))\b", jd_text, re.IGNORECASE):
+                    continue
+
                 jobs.append(NormalizedJob(
                     source="linkedin_india",
                     source_job_id=job_url,
@@ -65,7 +97,7 @@ class LinkedInIndiaSource(SourceAdapter):
                     company=company,
                     location=loc,
                     work_mode="Bangalore / Office / Hybrid",
-                    description=f"{title} at {company} in {loc}. Entry level / Fresher opportunity. Posted: {posted_time}.",
+                    description=jd_text[:2500],
                     job_url=job_url,
                     skills=[keywords],
                     posted_at=posted_time,

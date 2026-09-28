@@ -20,7 +20,9 @@ FORBIDDEN_DOMAINS = [
     "frontend", "front-end", "front end", "ui/ux", "ui developer", "ux developer",
     "web designer", "html/css", "wordpress", "mobile developer", "android", "ios",
     "swift", "kotlin", "react native", "dart",
-    # ERP / Non-Python / Testing / Operations
+    # Non-Python/Non-AI languages
+    "java developer", "golang", "go developer", ".net developer", "dotnet", "c#", "php developer", "ruby on rails",
+    # ERP / Testing / Operations
     "odoo", "salesforce", "sap", "qa", "tester", "test engineer", "automation tester",
     "devops", "sre", "sysadmin", "network engineer",
     # Non-software
@@ -44,7 +46,44 @@ INDIAN_HUBS = [
 
 # Reject if description or title demands 3+ years, 2-4 years, 2-5 years, or senior experience
 EXP_REJECT_PATTERN = re.compile(
-    r"\b(([3-9]|\d{2,})\s*(\+|-\s*\d+)?\s*(?:to\s*\d+\s*)?(?:years?|yrs?)|[2-9]\s*[-–to]+\s*[3-9]\s*(?:years?|yrs?))\b",
+    r"\b("
+    r"([3-9]|\d{2,})\s*(\+|-\s*\d+)?\s*(?:to\s*\d+\s*)?(?:years?|yrs?)"
+    r"|[2-9]\s*[-–to]+\s*[3-9]\s*(?:years?|yrs?)"
+    r"|2\s*to\s*[3-9]\s*(?:years?|yrs?)"
+    r"|minimum\s+([3-9]|\d{2,})\s*(?:years?|yrs?)"
+    r"|at\s+least\s+([3-9]|\d{2,})\s*(?:years?|yrs?)"
+    r"|3\+\s*(?:years?|yrs?)"
+    r"|4\+\s*(?:years?|yrs?)"
+    r"|5\+\s*(?:years?|yrs?)"
+    r")\b",
+    re.IGNORECASE
+)
+
+# Reject if title is an aggregator page, degree, course, or training program
+COURSE_AGGREGATOR_PATTERN = re.compile(
+    r"\b("
+    r"\d+\s+(?:vacancies|openings|jobs)"
+    r"|vacancies\s*in|openings\s*in|fresher\s*jobs\s*in"
+    r"|master\'?s|m\.?sc|b\.?tech\s+degree|online\s+degree|degree\s+program"
+    r"|certification|bootcamp|training\s+program|working\s+professionals"
+    r"|admissions?\s+open|syllabus|curriculum"
+    r")\b",
+    re.IGNORECASE
+)
+
+# Reject level 2/3 designations or mid/senior corporate roles
+LEVEL_REJECT_PATTERN = re.compile(
+    r"\b("
+    r"(?:data\s+scientist|software\s+engineer|ai\s+engineer|ml\s+engineer|machine\s+learning\s+engineer|developer|engineer)\s+(?:2|3|4|5|ii|iii|iv|v|l2|l3|lead|senior|principal|staff)"
+    r"|senior|sr\.|lead|principal|staff|manager|head\s+of|director|architect"
+    r"|sde\s*2|sde-2|sde2|sde\s*ii|sde\s*3|sde-3|sde3|sde\s*iii|mid-level|mid\s+level|intermediate"
+    r")\b",
+    re.IGNORECASE
+)
+
+# Mandatory fresher / 0-2 years positive confirmation (academic / college / trainee / intern / fresher)
+FRESHER_CONFIRM_PATTERN = re.compile(
+    r"\b(fresher|freshers|intern|internship|trainee|graduate|junior|jr|jr\.|0-1|0-2|0\s*to\s*1|0\s*to\s*2|entry\s*level|college|academic|new\s*grad|no\s*prior\s*experience|students?|degree|university|0\s*years?)\b",
     re.IGNORECASE
 )
 
@@ -55,7 +94,8 @@ SENIOR_KEYWORDS = [
     "sde 2", "sde-2", "sde2", "sde ii", "sde 3", "sde-3", "sde3", "sde iii", "sde 4", "sde iv",
     "software engineer 2", "software engineer ii", "software engineer 3", "software engineer iii",
     "engineer 2", "engineer ii", "engineer 3", "engineer iii",
-    "mid-level", "mid level", "intermediate", "experienced"
+    "data scientist 2", "data scientist ii", "data scientist 3",
+    "mid-level", "mid level", "intermediate", "experienced", "developer l2", "l2 developer"
 ]
 
 # Explicit fresher / 0-2 years positive indicators
@@ -67,7 +107,7 @@ FRESHER_BONUS_KEYWORDS = [
 
 # Strict AI / ML / Python / Data Science positive patterns (using word boundaries)
 AI_ML_PYTHON_PATTERN = re.compile(
-    r"\b(ai\b|ml\b|machine\s*learning|deep\s*learning|data\s*scien\w+|data\s*analys\w+|data\s*analyst|python|fastapi|django|nlp|llm|genai|generative\s*ai|computer\s*vision|backend|data\s*engineer|ai\s*engineer|ml\s*engineer|artificial\s*intelligence)\b",
+    r"\b(ai\b|ml\b|machine\s*learning|deep\s*learning|data\s*scien\w+|data\s*analys\w+|data\s*analyst|python|fastapi|django|nlp|llm|genai|generative\s*ai|computer\s*vision|data\s*engineer|ai\s*engineer|ml\s*engineer|artificial\s*intelligence)\b",
     re.IGNORECASE
 )
 
@@ -75,8 +115,8 @@ AI_ML_PYTHON_PATTERN = re.compile(
 def is_suitable_job(title: str, description: str, location: str) -> tuple[bool, int]:
     """
     Returns (is_suitable, priority_score).
-    Strictly accepts only 0-2 years experience / entry-level / fresher roles in AI, ML, Python, Data Science, and Backend in India (Bangalore #1).
-    Zero tolerance for frontend, flutter, react, or mobile.
+    Strictly accepts only verified 0-2 years experience / entry-level / fresher roles in AI, ML, Python, Data Science, and Backend in India (Bangalore #1).
+    Zero tolerance for >2 years experience, senior roles, or frontend.
     """
     t_low = title.lower()
     d_low = (description or "").lower()
@@ -87,24 +127,43 @@ def is_suitable_job(title: str, description: str, location: str) -> tuple[bool, 
         if kw in t_low:
             return False, 0
 
-    # 2. Strict Seniority & Experience filter: reject senior, mid-level, SDE 2/3, and >2 years requirement
+    # 2. Aggregator and course filter
+    if COURSE_AGGREGATOR_PATTERN.search(t_low) or COURSE_AGGREGATOR_PATTERN.search(d_low[:500]):
+        return False, 0
+
+    # 3. Level reject (Level 2/3, Senior, Lead, Consultant)
+    if LEVEL_REJECT_PATTERN.search(t_low):
+        return False, 0
+    if "consultant" in t_low and not any(w in t_low for w in ["junior", "fresher", "intern", "associate", "trainee"]):
+        return False, 0
+
+    # 4. Strict Seniority & Experience filter: reject senior, mid-level, SDE 2/3, and >=3 years requirement
     for kw in SENIOR_KEYWORDS:
-        if kw in t_low:
+        if kw in t_low or kw in d_low:
             return False, 0
 
     if EXP_REJECT_PATTERN.search(t_low) or EXP_REJECT_PATTERN.search(d_low):
         return False, 0
 
-    # 3. Positive domain match: MUST strictly be AI, ML, Data Science, Python, or Backend
+    # 5. Mandatory Fresher Confirmation: Either title or JD MUST confirm it is for freshers, interns, 0-2 yrs, or academic projects
+    has_fresher_title = bool(FRESHER_CONFIRM_PATTERN.search(t_low))
+    has_fresher_desc = bool(FRESHER_CONFIRM_PATTERN.search(d_low))
+    if not (has_fresher_title or has_fresher_desc):
+        return False, 0
+
+    # Disallow unverified short placeholder descriptions unless title is explicitly an intern/fresher
+    if len(d_low.strip()) < 80 and not has_fresher_title:
+        return False, 0
+
+    # 6. Positive domain match: MUST strictly be AI, ML, Data Science, Python, or Backend
     has_title_match = bool(AI_ML_PYTHON_PATTERN.search(t_low))
     if not has_title_match:
-        # If title doesn't explicitly mention AI/ML/Python, check if it's an engineering/developer/intern role with strong AI/ML description
         is_tech_role = any(r in t_low for r in ["developer", "engineer", "scientist", "intern", "programmer"])
         has_desc_match = bool(AI_ML_PYTHON_PATTERN.search(d_low))
         if not (is_tech_role and has_desc_match):
             return False, 0
 
-    # 4. Strict India filter: must be in Bangalore, an Indian tech metro, or remote eligible for India
+    # 5. Strict India filter: must be in Bangalore, an Indian tech metro, or remote eligible for India
     is_in_india = any(hub in loc_low for hub in INDIAN_HUBS)
     is_remote_open = ("remote" in loc_low or "anywhere" in loc_low or "worldwide" in loc_low) and not any(fl in loc_low for fl in FOREIGN_ONLY_LOCATIONS)
     if not (is_in_india or is_remote_open):
@@ -198,14 +257,14 @@ async def hunt_jobs_for_resume(resume_id: str) -> dict:
                 except Exception as e:
                     log.error("LinkedIn India error on '%s': %s", q, e)
 
-        # 2. Instahyre India (Bangalore / India tech hiring platform)
-        instahyre_src = SOURCES.get("instahyre")
-        if instahyre_src and instahyre_src.enabled and not instahyre_src.breaker.open:
+        # 2. Multi-Platform Web Fresher (Wellfound, Indeed, Internshala)
+        web_fresher_src = SOURCES.get("web_fresher")
+        if web_fresher_src and web_fresher_src.enabled and not web_fresher_src.breaker.open:
             try:
-                jobs = await instahyre_src.discover("python ai")
+                jobs = await web_fresher_src.discover("")
                 discovered_jobs.extend(jobs)
             except Exception as e:
-                log.error("Instahyre error: %s", e)
+                log.error("Web Fresher error: %s", e)
 
         # 3. Hasjob India Startup tech feed
         hasjob_src = SOURCES.get("hasjob_india")
