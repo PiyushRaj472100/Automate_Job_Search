@@ -1,6 +1,7 @@
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.db.database import get_session
 from backend.db.models import Application, Job
@@ -13,16 +14,41 @@ class JobUpdateReq(BaseModel):
     application_status: str | None = None
 
 
+def _format_time_ago(dt: datetime | None) -> str:
+    if not dt:
+        return "Recent"
+    now = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    diff = now - dt
+    total_seconds = int(diff.total_seconds())
+
+    if total_seconds < 60:
+        return "Just now"
+    elif total_seconds < 3600:
+        mins = total_seconds // 60
+        return f"{mins}m ago"
+    elif total_seconds < 86400:
+        hrs = total_seconds // 3600
+        return f"{hrs}h ago"
+    else:
+        days = total_seconds // 86400
+        return f"{days}d ago"
+
+
 def _format_job(j: Job) -> dict:
     comp = j.company or ""
     comp_encoded = comp.replace(" ", "%20")
+    loc = j.location or "Not specified"
+    is_blr = "bangalore" in loc.lower() or "bengaluru" in loc.lower()
     return {
         "id": j.id,
         "resume_id": j.resume_id,
         "title": j.title,
         "company": j.company,
-        "location": j.location or "Not specified",
+        "location": loc,
         "work_mode": j.work_mode or "Remote",
+        "is_bangalore": is_blr,
         "job_url": j.job_url,
         "application_url": j.application_url,
         "description": j.description,
@@ -30,6 +56,7 @@ def _format_job(j: Job) -> dict:
         "status": j.status,
         "application_status": j.application_status,
         "created_at": j.created_at.isoformat() if j.created_at else None,
+        "time_ago": _format_time_ago(j.created_at),
         "linkedin_recruiter_url": f"https://www.linkedin.com/search/results/people/?keywords={comp_encoded}%20technical%20recruiter%20Bengaluru" if comp else None,
         "linkedin_manager_url": f"https://www.linkedin.com/search/results/people/?keywords={comp_encoded}%20%22engineering%20manager%22%20Bengaluru" if comp else None,
         "linkedin_referral_url": f"https://www.linkedin.com/search/results/people/?keywords={comp_encoded}%20%22software%20engineer%22%20Bengaluru" if comp else None,
@@ -40,19 +67,43 @@ def _format_job(j: Job) -> dict:
 async def list_jobs(
     q: str | None = None,
     work_mode: str | None = None,
+    city: str | None = None,
     source: str | None = None,
-    limit: int = Query(50, ge=1, le=200),
+    sort_by: str = Query("latest", regex="^(latest|bangalore)$"),
+    limit: int = Query(60, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_session),
 ):
-    query = select(Job).order_by(Job.created_at.desc())
+    # Auto-exclude jobs older than 4 days
+    cutoff = datetime.now(timezone.utc) - timedelta(days=4)
+    query = select(Job).where(Job.created_at >= cutoff)
 
     if q:
         query = query.where(Job.title.ilike(f"%{q}%") | Job.company.ilike(f"%{q}%"))
     if work_mode:
         query = query.where(Job.work_mode.ilike(f"%{work_mode}%"))
+    if city:
+        if city.lower() in ["bangalore", "bengaluru"]:
+            query = query.where(Job.location.ilike("%bangalore%") | Job.location.ilike("%bengaluru%"))
+        elif city.lower() == "remote":
+            query = query.where(Job.work_mode.ilike("%remote%") | Job.location.ilike("%remote%"))
+        else:
+            query = query.where(Job.location.ilike(f"%{city}%"))
     if source:
         query = query.where(Job.source == source)
+
+    # Sorting
+    if sort_by == "bangalore":
+        # Bangalore first, then latest
+        blr_priority = case(
+            (Job.location.ilike("%bangalore%"), 1),
+            (Job.location.ilike("%bengaluru%"), 1),
+            else_=2
+        )
+        query = query.order_by(blr_priority, Job.created_at.desc())
+    else:
+        # Default: latest jobs first (within 1 hr, past 24h, etc.)
+        query = query.order_by(Job.created_at.desc())
 
     query = query.limit(limit).offset(offset)
     rows = (await db.execute(query)).scalars().all()

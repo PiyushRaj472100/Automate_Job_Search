@@ -78,6 +78,7 @@ export interface JobItem {
   company: string;
   location: string;
   work_mode: string;
+  is_bangalore?: boolean;
   job_url: string;
   application_url?: string;
   description?: string;
@@ -85,15 +86,18 @@ export interface JobItem {
   status: string;
   application_status: string;
   created_at: string;
+  time_ago?: string;
   linkedin_recruiter_url?: string;
   linkedin_manager_url?: string;
   linkedin_referral_url?: string;
 }
 
-export const getJobs = (params?: { q?: string; work_mode?: string }) => {
+export const getJobs = (params?: { q?: string; work_mode?: string; city?: string; sort_by?: string }) => {
   const sp = new URLSearchParams();
   if (params?.q) sp.set("q", params.q);
   if (params?.work_mode) sp.set("work_mode", params.work_mode);
+  if (params?.city) sp.set("city", params.city);
+  if (params?.sort_by) sp.set("sort_by", params.sort_by);
   return req<JobItem[]>(`/jobs?${sp.toString()}`);
 };
 export const applyToJob = (id: string) => req<{ message: string; application_id: string }>(`/jobs/${id}/apply`, { method: "POST" });

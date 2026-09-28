@@ -14,6 +14,7 @@ class NormalizedJob(BaseModel):
     job_url: str | None = None
     application_url: str | None = None
     skills: list[str] = []
+    posted_at: str | None = None
 
 
 class SourceAdapter(ABC):

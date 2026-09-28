@@ -25,10 +25,12 @@ class LinkedInIndiaSource(SourceAdapter):
         params = {
             "keywords": keywords,
             "location": location,
-            "f_E": "1,2",  # 1 = Internship, 2 = Entry level
+            "sortBy": "DD",       # Most recent postings first
+            "f_TPR": "r86400",     # Past 24 hours for fresh openings
+            "f_E": "1,2",          # 1 = Internship, 2 = Entry level
             "start": 0,
         }
-        async with httpx.AsyncClient(headers=HEADERS, timeout=15, follow_redirects=True) as client:
+        async with httpx.AsyncClient(headers=HEADERS, timeout=8, follow_redirects=True) as client:
             r = await client.get(BASE_URL, params=params)
             if r.status_code != 200:
                 return []
@@ -42,6 +44,7 @@ class LinkedInIndiaSource(SourceAdapter):
                 comp_el = c.find("h4", class_="base-search-card__subtitle")
                 loc_el = c.find("span", class_="job-search-card__location")
                 link_el = c.find("a", class_="base-card__full-link")
+                time_el = c.find("time")
 
                 if not title_el or not comp_el or not link_el:
                     continue
@@ -50,6 +53,7 @@ class LinkedInIndiaSource(SourceAdapter):
                 company = comp_el.get_text(strip=True)
                 loc = loc_el.get_text(strip=True) if loc_el else location
                 job_url = link_el.get("href", "").split("?")[0]  # clean tracking params
+                posted_time = time_el.get_text(strip=True) if time_el else "Recent (Past 24h)"
 
                 if not job_url.startswith("http"):
                     continue
@@ -61,24 +65,19 @@ class LinkedInIndiaSource(SourceAdapter):
                     company=company,
                     location=loc,
                     work_mode="Bangalore / Office / Hybrid",
-                    description=f"{title} at {company} in {loc}. Entry level / Fresher opportunity.",
+                    description=f"{title} at {company} in {loc}. Entry level / Fresher opportunity. Posted: {posted_time}.",
                     job_url=job_url,
-                    skills=[keywords]
+                    skills=[keywords],
+                    posted_at=posted_time,
                 ))
 
             return jobs
 
     async def discover(self, query: str) -> list[NormalizedJob]:
-        # Priority locations: Bengaluru, Hyderabad, Pune, Gurgaon
-        locations = ["Bengaluru", "India"]
-        all_jobs = []
-        for loc in locations:
-            try:
-                jobs = await self._search(keywords=query, location=loc)
-                all_jobs.extend(jobs)
-            except Exception:
-                continue
-        return all_jobs
+        try:
+            return await self._search(keywords=query, location="Bengaluru")
+        except Exception:
+            return []
 
     async def health_check(self) -> bool:
         try:

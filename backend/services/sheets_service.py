@@ -136,10 +136,66 @@ def create_or_get_spreadsheet(resume_id: str, filename: str, sheet_url: str | No
     }
 
 
+from datetime import datetime, timezone, timedelta
+
+
+def prune_sheet_jobs(spreadsheet_id: str, max_days: int = 4) -> int:
+    """Removes jobs from the 'Discovered Jobs' tab that are older than max_days."""
+    client = get_gspread_client()
+    if not client:
+        return 0
+
+    try:
+        sh = client.open_by_key(spreadsheet_id)
+        ws = sh.worksheet("Discovered Jobs")
+        all_vals = ws.get_all_values()
+        if len(all_vals) <= 1:
+            return 0
+
+        header = all_vals[0]
+        rows = all_vals[1:]
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(days=max_days)
+
+        kept_rows = []
+        pruned_count = 0
+
+        for r in rows:
+            discovered_at_str = r[9] if len(r) > 9 else ""
+            is_expired = False
+            if discovered_at_str:
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S %Z", "%Y-%m-%dT%H:%M:%S"):
+                    try:
+                        clean_str = discovered_at_str.split(".")[0].replace("Z", "")
+                        dt = datetime.strptime(clean_str, fmt).replace(tzinfo=timezone.utc)
+                        if dt < cutoff:
+                            is_expired = True
+                        break
+                    except Exception:
+                        pass
+            if is_expired:
+                pruned_count += 1
+            else:
+                kept_rows.append(r)
+
+        if pruned_count > 0:
+            ws.clear()
+            ws.append_rows([header] + kept_rows)
+            log.info("Pruned %d expired rows from sheet %s", pruned_count, spreadsheet_id)
+
+        return pruned_count
+    except Exception as e:
+        log.warning("Could not prune sheet %s: %s", spreadsheet_id, e)
+        return 0
+
+
 def sync_jobs_to_sheet(spreadsheet_id: str, jobs: list[dict]) -> int:
     client = get_gspread_client()
     if not client:
         raise ValueError("Google Service Account credentials not configured.")
+
+    # 1. First auto-prune any jobs older than 4 days
+    prune_sheet_jobs(spreadsheet_id, max_days=4)
 
     sh = client.open_by_key(spreadsheet_id)
     try:
@@ -148,7 +204,7 @@ def sync_jobs_to_sheet(spreadsheet_id: str, jobs: list[dict]) -> int:
         ws = sh.add_worksheet(title="Discovered Jobs", rows=1000, cols=10)
         ws.append_row([
             "Company Name", "Role / Title", "Application Link", "Work Mode",
-            "Location", "Approx Salary", "LinkedIn Referral Links", "Status",
+            "Location", "Approx Salary", "Bangalore Recruiter & Referral LinkedIn Links", "Status",
             "Source", "Discovered At"
         ])
 

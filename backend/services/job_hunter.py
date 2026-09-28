@@ -1,10 +1,11 @@
 import asyncio
 import hashlib
 import logging
+import re
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from backend.db.database import SessionLocal
 from backend.db.models import Job, Resume, SheetLink
 from backend.services import sheets_service
@@ -12,11 +13,20 @@ from backend.sources.registry import SOURCES
 
 log = logging.getLogger("job_hunter")
 
-# Strictly forbidden domains / roles that don't match software / Python / AI developer
+# Strictly forbidden domains / roles that don't match AI / ML / Python / Data Science
 FORBIDDEN_DOMAINS = [
+    # Frontend & Mobile (Strict zero tolerance as requested)
+    "flutter", "react", "react.js", "reactjs", "angular", "vue", "vue.js",
+    "frontend", "front-end", "front end", "ui/ux", "ui developer", "ux developer",
+    "web designer", "html/css", "wordpress", "mobile developer", "android", "ios",
+    "swift", "kotlin", "react native", "dart",
+    # ERP / Non-Python / Testing / Operations
+    "odoo", "salesforce", "sap", "qa", "tester", "test engineer", "automation tester",
+    "devops", "sre", "sysadmin", "network engineer",
+    # Non-software
     "mechanical", "electrical", "civil", "chemical", "hardware", "gimbal",
     "copywriter", "writer", "marketing", "sales", "seo", "content", "accountant",
-    "hr ", "recruiter", "nurse", "doctor", "cook", "fashion", "draping",
+    "executive", "insights", "hr ", "recruiter", "nurse", "doctor", "cook", "fashion", "draping",
     "video editor", "telecaller", "driver", "bpo", "voice process"
 ]
 
@@ -31,8 +41,6 @@ INDIAN_HUBS = [
     "bengaluru", "bangalore", "hyderabad", "pune", "gurgaon", "gurugram",
     "noida", "delhi", "mumbai", "chennai", "india"
 ]
-
-import re
 
 # Reject if description or title demands 3+ years, 2-4 years, 2-5 years, or senior experience
 EXP_REJECT_PATTERN = re.compile(
@@ -57,23 +65,24 @@ FRESHER_BONUS_KEYWORDS = [
     "0-1", "0-2", "1-2"
 ]
 
-# Required positive domain indicators
-TECH_ROLE_KEYWORDS = [
-    "python", "backend", "ai", "ml", "machine learning", "software",
-    "developer", "engineer", "data science", "fastapi", "django", "nlp", "deep learning"
-]
+# Strict AI / ML / Python / Data Science positive patterns (using word boundaries)
+AI_ML_PYTHON_PATTERN = re.compile(
+    r"\b(ai\b|ml\b|machine\s*learning|deep\s*learning|data\s*scien\w+|data\s*analys\w+|data\s*analyst|python|fastapi|django|nlp|llm|genai|generative\s*ai|computer\s*vision|backend|data\s*engineer|ai\s*engineer|ml\s*engineer|artificial\s*intelligence)\b",
+    re.IGNORECASE
+)
 
 
 def is_suitable_job(title: str, description: str, location: str) -> tuple[bool, int]:
     """
     Returns (is_suitable, priority_score).
-    Strictly accepts only 0-2 years experience / entry-level / fresher roles in India (Bangalore #1).
+    Strictly accepts only 0-2 years experience / entry-level / fresher roles in AI, ML, Python, Data Science, and Backend in India (Bangalore #1).
+    Zero tolerance for frontend, flutter, react, or mobile.
     """
     t_low = title.lower()
     d_low = (description or "").lower()
     loc_low = (location or "").lower()
 
-    # 1. Negative domain filter: zero tolerance for non-tech / mechanical / electrical
+    # 1. Negative domain filter: zero tolerance for frontend, mobile, non-tech
     for kw in FORBIDDEN_DOMAINS:
         if kw in t_low:
             return False, 0
@@ -86,10 +95,14 @@ def is_suitable_job(title: str, description: str, location: str) -> tuple[bool, 
     if EXP_REJECT_PATTERN.search(t_low) or EXP_REJECT_PATTERN.search(d_low):
         return False, 0
 
-    # 3. Positive domain match: must be tech / software / python / AI
-    has_tech = any(kw in t_low for kw in TECH_ROLE_KEYWORDS)
-    if not has_tech:
-        return False, 0
+    # 3. Positive domain match: MUST strictly be AI, ML, Data Science, Python, or Backend
+    has_title_match = bool(AI_ML_PYTHON_PATTERN.search(t_low))
+    if not has_title_match:
+        # If title doesn't explicitly mention AI/ML/Python, check if it's an engineering/developer/intern role with strong AI/ML description
+        is_tech_role = any(r in t_low for r in ["developer", "engineer", "scientist", "intern", "programmer"])
+        has_desc_match = bool(AI_ML_PYTHON_PATTERN.search(d_low))
+        if not (is_tech_role and has_desc_match):
+            return False, 0
 
     # 4. Strict India filter: must be in Bangalore, an Indian tech metro, or remote eligible for India
     is_in_india = any(hub in loc_low for hub in INDIAN_HUBS)
@@ -116,7 +129,7 @@ async def verify_job_url(url: str) -> bool:
     """Verifies that the job link is alive and working."""
     if not url or not url.startswith("http"):
         return False
-    trusted = ["linkedin.com", "hasjob.co", "jobicy.com", "remotive.com", "arbeitnow.com"]
+    trusted = ["linkedin.com", "hasjob.co", "instahyre.com", "jobicy.com", "remotive.com", "arbeitnow.com"]
     if any(dom in url for dom in trusted):
         return True
     try:
@@ -154,23 +167,28 @@ async def hunt_jobs_for_resume(resume_id: str) -> dict:
             log.warning("Resume %s not found for job hunt", resume_id)
             return {"status": "error", "message": "Resume not found"}
 
-        # Targeted Indian queries: Bangalore priority (0-2 years entry-level / fresher)
+        # Auto-prune jobs older than 4 days in DB to ensure freshness
+        cutoff = datetime.now(timezone.utc) - timedelta(days=4)
+        try:
+            await db.execute(delete(Job).where(Job.created_at < cutoff))
+            await db.commit()
+            log.info("Auto-pruned jobs older than 4 days from database")
+        except Exception as e:
+            log.warning("Failed to prune old DB jobs: %s", e)
+
+        # Targeted Indian queries strictly for AI, ML, Python, Data Science (0-2 years / fresher)
         targeted_queries = [
-            "python developer fresher",
-            "junior python developer",
-            "entry level python developer",
-            "python developer 0-2 years",
-            "junior backend developer",
-            "backend developer fresher",
             "ai engineer intern",
+            "junior data scientist",
+            "machine learning entry level",
+            "python backend developer fresher",
+            "python developer fresher",
             "junior ai engineer",
-            "entry level machine learning",
-            "fastapi developer fresher",
         ]
 
         discovered_jobs = []
 
-        # 1. Primary: LinkedIn India Guest API for Bangalore & Indian entry-level tech roles
+        # 1. Primary: LinkedIn India Guest API (Date Descending, past 24h)
         linkedin_src = SOURCES.get("linkedin_india")
         if linkedin_src and linkedin_src.enabled and not linkedin_src.breaker.open:
             for q in targeted_queries:
@@ -180,16 +198,25 @@ async def hunt_jobs_for_resume(resume_id: str) -> dict:
                 except Exception as e:
                     log.error("LinkedIn India error on '%s': %s", q, e)
 
-        # 2. Hasjob India Startup tech feed
+        # 2. Instahyre India (Bangalore / India tech hiring platform)
+        instahyre_src = SOURCES.get("instahyre")
+        if instahyre_src and instahyre_src.enabled and not instahyre_src.breaker.open:
+            try:
+                jobs = await instahyre_src.discover("python ai")
+                discovered_jobs.extend(jobs)
+            except Exception as e:
+                log.error("Instahyre error: %s", e)
+
+        # 3. Hasjob India Startup tech feed
         hasjob_src = SOURCES.get("hasjob_india")
         if hasjob_src and hasjob_src.enabled and not hasjob_src.breaker.open:
             try:
-                jobs = await hasjob_src.discover("python developer")
+                jobs = await hasjob_src.discover("python ai")
                 discovered_jobs.extend(jobs)
             except Exception as e:
                 log.error("Hasjob error: %s", e)
 
-        # Filter strictly for domain matching, Indian/Bangalore priority, and entry level
+        # Filter strictly for AI/ML/Python/Data Science, Indian/Bangalore priority, and 0-2 yrs
         scored_jobs = []
         seen_urls = set()
 
@@ -226,14 +253,21 @@ async def hunt_jobs_for_resume(resume_id: str) -> dict:
             if not is_alive:
                 continue
 
-            # Location formatting (ensure Bangalore / India is prominently visible)
+            # Location and work mode formatting (Office, Remote, Hybrid)
             loc = j.location or "Bengaluru, Karnataka, India"
-            if "bengaluru" in loc.lower() or "bangalore" in loc.lower():
-                work_mode = "Bangalore (On-site / Hybrid)"
-            elif any(h in loc.lower() for h in INDIAN_HUBS):
-                work_mode = f"{loc} (India)"
-            else:
+            loc_low = loc.lower()
+            t_low = j.title.lower()
+
+            if "remote" in loc_low or "remote" in t_low:
                 work_mode = "Remote (India Eligible)"
+            elif "hybrid" in loc_low or "hybrid" in t_low:
+                work_mode = "Hybrid (Bangalore)" if ("bangalore" in loc_low or "bengaluru" in loc_low) else "Hybrid"
+            elif "bangalore" in loc_low or "bengaluru" in loc_low:
+                work_mode = "Work from Office (Bangalore)"
+            elif any(h in loc_low for h in INDIAN_HUBS):
+                work_mode = f"Work from Office ({loc.split(',')[0]})"
+            else:
+                work_mode = "Work from Office"
 
             referral_links = generate_verified_linkedin_links(j.company, location="Bengaluru")
 
@@ -263,21 +297,24 @@ async def hunt_jobs_for_resume(resume_id: str) -> dict:
                 "status": "NEW",
             })
 
-            # Save in batches of up to 30 top matching jobs
-            if len(new_jobs) >= 30:
+            # Save in batches of up to 35 top matching jobs
+            if len(new_jobs) >= 35:
                 break
 
         if new_jobs:
             await db.commit()
-            log.info("Persisted %d verified Indian tech jobs to DB for resume %s", len(new_jobs), resume_id)
+            log.info("Persisted %d verified AI/ML/Python jobs to DB for resume %s", len(new_jobs), resume_id)
 
-        # Sync to Google Sheet if linked
+        # Sync to Google Sheet if linked (prunes jobs older than 4 days automatically)
         sheet_res = await db.execute(select(SheetLink).where(SheetLink.resume_id == resume_id))
         sheet = sheet_res.scalars().first()
         synced_count = 0
-        if sheet and new_jobs:
+        if sheet:
             try:
-                synced_count = sheets_service.sync_jobs_to_sheet(sheet.spreadsheet_id, new_jobs)
+                # Prune old sheet rows even if new_jobs is empty
+                sheets_service.prune_sheet_jobs(sheet.spreadsheet_id, max_days=4)
+                if new_jobs:
+                    synced_count = sheets_service.sync_jobs_to_sheet(sheet.spreadsheet_id, new_jobs)
                 sheet.last_synced_at = datetime.now(timezone.utc)
                 sheet.sync_status = "SYNCED"
                 await db.commit()
@@ -295,11 +332,16 @@ async def hunt_jobs_for_resume(resume_id: str) -> dict:
 
 
 async def run_periodic_sweep():
-    """Background task that runs periodically across all resumes."""
+    """Background task that runs periodically across all resumes and purges 4-day-old records."""
     while True:
         try:
             log.info("Starting scheduled periodic job sweep for Indian tech hubs...")
             async with SessionLocal() as db:
+                # Prune old jobs across DB
+                cutoff = datetime.now(timezone.utc) - timedelta(days=4)
+                await db.execute(delete(Job).where(Job.created_at < cutoff))
+                await db.commit()
+
                 res = await db.execute(select(Resume.id))
                 resume_ids = res.scalars().all()
 
