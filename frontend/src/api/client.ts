@@ -34,6 +34,8 @@ export const uploadResume = (file: File) => {
   f.append("file", file);
   return req<Resume>("/resumes", { method: "POST", body: f });
 };
+export const toggleResumeActive = (id: string, is_active?: boolean) =>
+  req<{ id: string; is_active: boolean; message: string }>(`/resumes/${id}/toggle-active`, json({ is_active }, "POST"));
 
 // Discovery
 export const getSources = () => req<SourceInfo[]>("/discovery/sources");
@@ -47,7 +49,17 @@ export const createResumeSheet = (id: string) => req<{ spreadsheet_url: string }
 export const connectResumeSheet = (id: string, spreadsheet_url: string) =>
   req<{ spreadsheet_url: string; message: string }>(`/resumes/${id}/connect-sheet`, json({ spreadsheet_url }));
 export const huntResumeJobs = (id: string) =>
-  req<{ status: string; discovered: number; suitable_entry_level: number; new_persisted: number; synced_to_sheet: number }>(`/resumes/${id}/hunt`, { method: "POST" });
+  req<{
+    status: string;
+    discovered: number;
+    suitable_tech_india?: number;
+    suitable_entry_level?: number;
+    new_persisted: number;
+    synced_to_sheet: number;
+    is_active?: boolean;
+    last_hunted_at?: string | null;
+    hunt_count?: number;
+  }>(`/resumes/${id}/hunt`, { method: "POST" });
 
 // Dashboard
 export const getDashboardStats = () => req<{

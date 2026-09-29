@@ -22,6 +22,10 @@ async def lifespan(app):
         async with engine.begin() as conn:
             import backend.db.models  # noqa: F401
             await conn.run_sync(Base.metadata.create_all)
+            from sqlalchemy import text
+            await conn.execute(text("ALTER TABLE resumes ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;"))
+            await conn.execute(text("ALTER TABLE resumes ADD COLUMN IF NOT EXISTS last_hunted_at TIMESTAMPTZ;"))
+            await conn.execute(text("ALTER TABLE resumes ADD COLUMN IF NOT EXISTS hunt_count INTEGER DEFAULT 0;"))
             log.info("Database connection verified and tables initialized successfully.")
     except Exception as e:
         log.error("database unavailable at startup: %s", type(e).__name__)

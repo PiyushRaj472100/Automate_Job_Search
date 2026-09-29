@@ -1,4 +1,15 @@
-export interface Resume { id: string; filename: string; file_hash: string; created_at: string; target_roles: string[]; seniority: string | null; skills: string[]; }
+export interface Resume {
+  id: string;
+  filename: string;
+  file_hash: string;
+  created_at: string;
+  target_roles: string[];
+  seniority: string | null;
+  skills: string[];
+  is_active: boolean;
+  last_hunted_at: string | null;
+  hunt_count: number;
+}
 export interface ResumeProfile { target_roles: string[]; skills: string[]; seniority: string; projects: unknown[]; education: unknown[]; experience: unknown[]; }
 export interface Health { status: string; project: string; environment: string; version: string; timestamp: string; }
 export interface Readiness { ready: boolean; details: Record<string, string>; }

@@ -12,9 +12,18 @@ router = APIRouter(prefix="/resumes", tags=["resumes"])
 
 
 def _out(r: Resume) -> dict:
-    return {"id": r.id, "filename": r.filename, "file_hash": r.file_hash,
-            "created_at": r.created_at, "target_roles": r.profile.get("target_roles", []),
-            "seniority": r.profile.get("seniority"), "skills": r.profile.get("skills", [])}
+    return {
+        "id": r.id,
+        "filename": r.filename,
+        "file_hash": r.file_hash,
+        "created_at": r.created_at,
+        "target_roles": r.profile.get("target_roles", []) if isinstance(r.profile, dict) else [],
+        "seniority": r.profile.get("seniority") if isinstance(r.profile, dict) else None,
+        "skills": r.profile.get("skills", []) if isinstance(r.profile, dict) else [],
+        "is_active": getattr(r, "is_active", True),
+        "last_hunted_at": r.last_hunted_at.isoformat() if getattr(r, "last_hunted_at", None) else None,
+        "hunt_count": getattr(r, "hunt_count", 0) or 0,
+    }
 
 
 @router.post("", status_code=201)
@@ -105,10 +114,27 @@ async def create_or_sync_sheet(resume_id: str, db: AsyncSession = Depends(get_se
             "already_existed": True,
         }
 
+    # Determine tab name: "Resume 1", "Resume 2", etc.
+    all_res = (await db.execute(select(Resume.id).order_by(Resume.created_at.asc()))).scalars().all()
     try:
-        data = sheets_service.create_or_get_spreadsheet(resume.id, resume.filename)
+        resume_num = all_res.index(resume.id) + 1
+    except ValueError:
+        resume_num = 1
+    tab_name = f"Resume {resume_num}"
+
+    # Use shared sheet URL if already connected for another resume
+    shared_sheet = (await db.execute(select(SheetLink).where(SheetLink.spreadsheet_url != ""))).scalars().first()
+    shared_url = (shared_sheet.spreadsheet_url if shared_sheet else "") or get_settings().GOOGLE_SHEET_URL
+
+    try:
+        data = sheets_service.create_or_get_spreadsheet(
+            resume.id,
+            resume.filename,
+            sheet_url=shared_url or None,
+            tab_name=tab_name,
+        )
     except Exception as e:
-        raise HTTPException(502, f"Failed to create Google Sheet: {e}")
+        raise HTTPException(502, f"Failed to connect Google Sheet: {e}")
 
     sheet = SheetLink(
         resume_id=resume.id,
@@ -136,17 +162,31 @@ class ConnectSheetReq(BaseModel):
 
 @router.post("/{resume_id}/connect-sheet")
 async def connect_sheet(resume_id: str, req: ConnectSheetReq, db: AsyncSession = Depends(get_session)):
-    resume = await _get(db, resume_id)
     url = req.spreadsheet_url.strip()
     if not url.startswith("http"):
         raise HTTPException(400, "Please provide a valid Google Sheet URL starting with https://")
 
-    # Update config and environment so sheets_service uses it
+    resume = await _get(db, resume_id)
+
+    # Update config and environment so sheets_service and future resumes reuse it
     from backend.core.config import get_settings
     get_settings().GOOGLE_SHEET_URL = url
 
+    # Determine tab name: "Resume 1", "Resume 2", etc.
+    all_res = (await db.execute(select(Resume.id).order_by(Resume.created_at.asc()))).scalars().all()
     try:
-        data = sheets_service.create_or_get_spreadsheet(resume.id, resume.filename, sheet_url=url)
+        resume_num = all_res.index(resume.id) + 1
+    except ValueError:
+        resume_num = 1
+    tab_name = f"Resume {resume_num}"
+
+    try:
+        data = sheets_service.create_or_get_spreadsheet(
+            resume.id,
+            resume.filename,
+            sheet_url=url,
+            tab_name=tab_name,
+        )
     except Exception as e:
         raise HTTPException(400, f"{e}")
 
@@ -168,7 +208,7 @@ async def connect_sheet(resume_id: str, req: ConnectSheetReq, db: AsyncSession =
     await db.commit()
     await db.refresh(sheet)
 
-    # Immediately trigger an entry-level job hunt and sync to sheet in background
+    # Immediately trigger an entry-level job hunt and sync to sheet tab in background
     asyncio.create_task(job_hunter.hunt_jobs_for_resume(resume.id))
 
     return {
@@ -176,13 +216,74 @@ async def connect_sheet(resume_id: str, req: ConnectSheetReq, db: AsyncSession =
         "spreadsheet_id": sheet.spreadsheet_id,
         "spreadsheet_url": sheet.spreadsheet_url,
         "sync_status": sheet.sync_status,
-        "message": "Google Sheet connected successfully! Autonomous job hunt started."
+        "message": f"Google Sheet connected successfully! Tab '{tab_name}' created and autonomous job hunt started."
+    }
+
+
+class ToggleActiveReq(BaseModel):
+    is_active: bool | None = None
+
+
+@router.post("/{resume_id}/toggle-active")
+async def toggle_resume_active(
+    resume_id: str,
+    req: ToggleActiveReq | None = None,
+    db: AsyncSession = Depends(get_session),
+):
+    resume = await _get(db, resume_id)
+    new_state = req.is_active if (req and req.is_active is not None) else not getattr(resume, "is_active", True)
+    resume.is_active = new_state
+    await db.commit()
+    await db.refresh(resume)
+
+    if new_state:
+        # User reactivated this resume -> immediately start a fresh job search
+        asyncio.create_task(job_hunter.hunt_jobs_for_resume(resume.id))
+
+    status_str = "ACTIVE" if new_state else "PAUSED"
+    msg = f"Resume live job search is now {status_str}."
+    if new_state:
+        msg += " Continuous background hunting is enabled (5-8 times per day)."
+    else:
+        msg += " All automatic searching for this profile has been stopped."
+
+    return {
+        "id": resume.id,
+        "is_active": resume.is_active,
+        "message": msg,
+    }
+
+
+@router.post("/{resume_id}/deactivate")
+async def deactivate_resume(resume_id: str, db: AsyncSession = Depends(get_session)):
+    resume = await _get(db, resume_id)
+    resume.is_active = False
+    await db.commit()
+    await db.refresh(resume)
+    return {
+        "id": resume.id,
+        "is_active": False,
+        "message": "Continuous job searching has been stopped for this resume.",
+    }
+
+
+@router.post("/{resume_id}/activate")
+async def activate_resume(resume_id: str, db: AsyncSession = Depends(get_session)):
+    resume = await _get(db, resume_id)
+    resume.is_active = True
+    await db.commit()
+    await db.refresh(resume)
+    asyncio.create_task(job_hunter.hunt_jobs_for_resume(resume.id))
+    return {
+        "id": resume.id,
+        "is_active": True,
+        "message": "Resume live job hunt is now ACTIVE! Fresh opportunities will be researched 5-8 times per day.",
     }
 
 
 @router.post("/{resume_id}/hunt")
 async def trigger_hunt(resume_id: str, db: AsyncSession = Depends(get_session)):
     await _get(db, resume_id)
-    res = await job_hunter.hunt_jobs_for_resume(resume_id)
+    res = await job_hunter.hunt_jobs_for_resume(resume_id, force=True)
     return res
 

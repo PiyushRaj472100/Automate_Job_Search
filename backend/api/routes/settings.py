@@ -15,13 +15,14 @@ class SettingsUpdateReq(BaseModel):
 async def get_current_settings():
     s = get_settings()
     from backend.services.sheets_service import get_service_account_email
+    sa_email = get_service_account_email()
     return {
         "project_name": s.PROJECT_NAME,
         "environment": s.ENVIRONMENT,
         "api_v1_prefix": s.API_V1_PREFIX,
         "database_configured": bool(s.DATABASE_URL),
-        "google_sheets_configured": bool(s.GOOGLE_SERVICE_ACCOUNT_FILE or s.GOOGLE_SERVICE_ACCOUNT_JSON),
-        "service_account_email": get_service_account_email(),
+        "google_sheets_configured": bool(sa_email),
+        "service_account_email": sa_email,
         "google_sheet_url": s.GOOGLE_SHEET_URL,
         "share_email": s.GOOGLE_SHEETS_SHARE_USER_EMAIL,
         "gemini_api_key_configured": bool(s.GEMINI_API_KEY),

@@ -1,128 +1,186 @@
+﻿import base64
 import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
+import re
 import gspread
 from google.oauth2.service_account import Credentials
 from backend.core.config import get_settings
 
 log = logging.getLogger("sheets")
 
-import re
-
-import base64
-
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
 
-# Production Google Cloud Service Account for autonomous Sheets integration
-_B64_SA = (
-    "ewogICJ0eXBlIjogInNlcnZpY2VfYWNjb3VudCIsCiAgInByb2plY3RfaWQiOiAiYXV0b21hdGUt"
-    "am9iLXNlYXJjaC01MTAwMDIiLAogICJwcml2YXRlX2tleV9pZCI6ICJjNjEzYWE2YzAzY2MwN2M1"
-    "ZjdlNTIyOTFmNzBiYzM1ZTVhZjZmNThhIiwKICAicHJpdmF0ZV9rZXkiOiAiLS0tLS1CRUdJTiBQ"
-    "UklWQVRFIEtFWS0tLS0tXG5NSUlFdlFJQkFEQU5CZ2txaGtpRzl3MEJBUUVGQUFTQ0JLY3dnZ1Nq"
-    "QWdFQUFvSUJBUUM0MHhhSVFZMythTDd5XG56V3NuSVNiOHp6cGg5N2o4MTNOcS93bUxGdUZobUUv"
-    "MWRieW9BWURmQnRXWi9MS3JSNE1LUDQ0RDRvN3d4U0dEXG5nRE40Z1pWUzk5djJwSnNxb3h5ekkr"
-    "RXlCVkRGdDAvcUh1dFR3L0JsQUEyQnFEaHcrcVRTQ25kbzJGd29sUU1OXG56NkIwNndUbXBFT1ZY"
-    "WXB0bVRMTVdEMFp3ZmFVSnFsL3k1U0w4VXJaZUYwY2ZBVVNmUzJ3VXJ0SzZNZVZiUTRoXG5rSyto"
-    "QkE0WU9sV3RJK1BkNTZQNWtDaG5jTUNTODgvYlZ0YmNKbzBXMzdlRlVKK3k1RjUxWGJZR2ZnbDhP"
-    "QWNyXG5XYU9sTFdIRE9GQnhrTUxYem5tQ0RsblhuYWpDTUZBa0RiMkpTV1ZCK3hpeDRPZEpVQlU0"
-    "OWVLUlFUUVNpdGNNXG5Qbk9zUUc1MUFnTUJBQUVDZ2dFQVdhOW9wQ2EzV2VnSEhIZnNrcGpHTysv"
-    "czR5UWJtbW1MNHJRdU05V2UrVVk1XG5LcUYrc2NIRkFMUm15eW14bzJaNG9tenpvMVA1UzhGRXdY"
-    "Umd4WTJQNGFwUGpSQVVFVzBFSExPQTc4NWZnd213XG5XQ20zeExaMFBQWjVGMTBEUW1PRnZqeUE5"
-    "Qm5sSW5Zb2ZMZXZJM3oxckZ1eVJkVVZ1cGdYNjh1M25udWVCUVluXG5LMkZ1NVYzSWRpT0xiQURq"
-    "OTY5bjk1RmlsM2xzNGRmdE9RaW9XYUpYYzhsaUZOY0JFekFiY0ZmRktlL3VSemphXG5WZW1GOHZZ"
-    "Q0hkaGZqSUo2Uk9tL3ZZa1hRWTgyVFRLRWFvQXd0TVlxL0tKUWVYTzNLRmRON3h4b2QrL0JCNVk1"
-    "XG5RM0pGd2Fxb0dkdnVYL2xXMURLUVhwMGhwQWRJSWoySnpBSlVPQXF3OHdLQmdRRDA2cGk0OURj"
-    "OUtaQmtCaTZaXG5IeGZ3T2o5UmRrbWpxVlh3YkZ0bEZSL2xGdjZYVGoxR3YrTzlaejQyVXVCQ3ZN"
-    "UnJQL2NnSlh1c1JZK2ZveTQ1XG5EdWkxZi9uOGdGc2g3MDhvY2dQeWYybEZSMVBVZHV5TThyN3BS"
-    "RXB4T3NuK0hJeFJWR2prVFVBVUkc2ndvOEVTXG51OUpNNzEvTTJmL3FJZlY0a2dlMkpLVFZzd0tC"
-    "Z1FEQk1GRG85UXBJMXJQbjBNcnh6ZkcweVI3Q0xQcERRU0tuXG50RVJ0RHVYN21CY3BhYlVKOVho"
-    "ajU4bmhyVXFCK1J6Y2tKN01VK2MzUWs1TWpBVWQ5M1RxT0pxVktVUytWdXFLXG5HbGY0OUFiS2Nk"
-    "UGlhNTdwckdyd3AvRHZjTEQycmhFZENZamx4dHk3N012UE5DcW1wdFJSa2RGOXhhUVJlalFxXG5j"
-    "VGFHY3Zibk53S0JnUUNzNVVRRkpWb3Rrajc5YmFQTnNyYWFmdlFlRk93dFhpaHQvb0NTbmxRU3pL"
-    "WFR1SWJuXG5nQ1ZNbXlxKy9NaVdORjVRL0NvQUJwWUU2bUpXcHNMRnd2R2kxNEpwcjA4bWFLTXdB"
-    "VFVxSnFueEgwWmRzY3FTXG5RZmRtQXpDdU9IdEtLV3NoS3Y2VlZMZU14R3JHSmdQeHJxZnFhZjN1"
-    "Um1NMExONzJTOWlueTd5Vm93S0JnQTEyXG5aMzBFYm5ZSytEaUVWVkFxY05pUFYyUmlyQUg1elFk"
-    "d3lYL3NGTnpHaVg2cVRpSm1oOEEyaTl2OUxuOEdOQnV1XG52Rkl5MnA4QU1PS21zMGlXVVFCdGQy"
-    "QkRvdlc4cXRWNjVueUR6T0ZZczFKSSs2Yi9DK2kvVzB2a1I0QzVPcG9TXG5hd2JRSjl1MHNiTTd5"
-    "R2thb1JzYUZVWTFlcXg1SHArQ2lqRXVXOFJiQW9HQVNkUmpqL2N0OGZLOEpTYTdxRUFPXG5wa0dx"
-    "eXJNQ243amhEUlZxQ2NFVlhBdDY1QzZaZzJ0RjlHYVU2UzBBOWVwMUVQZ285OG9nemNTL3RDTkkr"
-    "S1hBXG5MY3p6elZ5SnZmR0g3d3FaYVN3cUtCNVJ6ZWdRejlXYjZ6dllsZUpBZS8wS0Uwai9HbzlC"
-    "ZlJncElOcmsxU2NvXG5ycU5uc3pKRnJMMVhJU3ZzanhENWovOD1cbi0tLS0tRU5EIFBSSVZBVEUg"
-    "S0VZLS0tLS1cbiIsCiAgImNsaWVudF9lbWFpbCI6ICJqb2ItaW50ZWxsaWdlbmNlLXNoZWV0c0Bh"
-    "dXRvbWF0ZS1qb2Itc2VhcmNoLTUxMDAwMi5pYW0uZ3NlcnZpY2VhY2NvdW50LmNvbSIsCiAgImNs"
-    "aWVudF9pZCI6ICIxMTIwMTE1MTczODY1Nzc3OTEwOTIiLAogICJhdXRoX3VyaSI6ICJodHRwczov"
-    "L2FjY291bnRzLmdvb2dsZS5jb20vby9vYXV0aDIvYXV0aCIsCiAgInRva2VuX3VyaSI6ICJodHRw"
-    "czovL29hdXRoMi5nb29nbGVhcGlzLmNvbS90b2tlbiIsCiAgImF1dGhfcHJvdmlkZXJfeDUwOV9j"
-    "ZXJ0X3VybCI6ICJodHRwczovL3d3dy5nb29nbGVhcGlzLmNvbS9vYXV0aDIvdjEvY2VydHMiLAog"
-    "ICJjbGllbnRfeDUwOV9jZXJ0X3VybCI6ICJodHRwczovL3d3dy5nb29nbGVhcGlzLmNvbS9yb2Jv"
-    "dC92MS9tZXRhZGF0YS94NTA5L2pvYi1pbnRlbGxpZ2VuY2Utc2hlZXRzJTQwYXV0b21hdGUtam9i"
-    "LXNlYXJjaC01MTAwMDIuaWFtLmdzZXJ2aWNlYWNjb3VudC5jb20iLAogICJ1bml2ZXJzZV9kb21h"
-    "aW4iOiAiZ29vZ2xlYXBpcy5jb20iCn0K"
-)
 
+def _parse_service_account_dict(raw: str) -> dict:
+    """Parses a service account JSON string, supporting raw JSON or base64."""
+    if not raw or not raw.strip():
+        raise ValueError("Service account JSON string is empty")
 
-def _get_default_sa_info() -> dict:
+    s = raw.strip()
+    # Strip wrapping single/double quotes if an env var was quoted
+    if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+        s = s[1:-1].strip()
+
+    # If it does not start with '{', it might be base64-encoded
+    if not s.startswith("{"):
+        try:
+            decoded = base64.b64decode(s).decode("utf-8").strip()
+            if decoded.startswith("{"):
+                s = decoded
+        except Exception:
+            pass
+
     try:
-        return json.loads(base64.b64decode(_B64_SA).decode("utf-8"))
-    except Exception:
-        return {}
+        data = json.loads(s)
+    except Exception as e:
+        raise ValueError(f"Failed to parse service account JSON: {e}")
+
+    if not isinstance(data, dict):
+        raise ValueError("Service account JSON must be a JSON object")
+
+    # In environment variables, newlines in private_key often get escaped to literal '\\n'
+    if "private_key" in data and isinstance(data["private_key"], str):
+        if "\\n" in data["private_key"] and "\n" not in data["private_key"]:
+            data["private_key"] = data["private_key"].replace("\\n", "\n")
+
+    missing = [k for k in ("client_email", "token_uri", "private_key") if k not in data]
+    if missing:
+        raise ValueError(f"Service account info missing required fields: {', '.join(missing)}")
+
+    return data
+
+
+def get_service_account_info() -> tuple[dict | None, str | None]:
+    """
+    Retrieves the service account info dict from:
+    1. GOOGLE_SERVICE_ACCOUNT_JSON env var (raw or base64)
+    2. GOOGLE_SERVICE_ACCOUNT_FILE env var (if file exists)
+    3. Standard file locations:
+       - /etc/secrets/service_account.json (Render Secret Files default)
+       - backend/credentials/service_account.json
+       - credentials/service_account.json
+    Returns (info_dict, error_message).
+    """
+    settings = get_settings()
+    last_err: str | None = None
+
+    # 1. Check GOOGLE_SERVICE_ACCOUNT_JSON environment variable
+    if settings.GOOGLE_SERVICE_ACCOUNT_JSON and settings.GOOGLE_SERVICE_ACCOUNT_JSON.strip():
+        try:
+            data = _parse_service_account_dict(settings.GOOGLE_SERVICE_ACCOUNT_JSON)
+            return data, None
+        except Exception as e:
+            last_err = f"Invalid GOOGLE_SERVICE_ACCOUNT_JSON: {e}"
+            log.warning("%s", last_err)
+
+    # 2. Check GOOGLE_SERVICE_ACCOUNT_FILE environment variable
+    if settings.GOOGLE_SERVICE_ACCOUNT_FILE and settings.GOOGLE_SERVICE_ACCOUNT_FILE.strip():
+        filepath = Path(settings.GOOGLE_SERVICE_ACCOUNT_FILE.strip())
+        candidate_paths = [filepath]
+        if not filepath.is_absolute():
+            candidate_paths.append(Path.cwd() / filepath)
+            candidate_paths.append(Path(__file__).resolve().parent.parent.parent / filepath)
+
+        found = False
+        for p in candidate_paths:
+            if p.is_file():
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        data = _parse_service_account_dict(f.read())
+                    return data, None
+                except Exception as e:
+                    last_err = f"Failed to load service account file '{p}': {e}"
+                    log.warning("%s", last_err)
+                found = True
+                break
+        if not found:
+            log.warning("Service account file not found at path: %s", settings.GOOGLE_SERVICE_ACCOUNT_FILE)
+
+    # 3. Check well-known default locations
+    default_candidates = [
+        Path("/etc/secrets/service_account.json"),  # Standard Render Secret File path
+        Path(__file__).resolve().parent.parent / "credentials" / "service_account.json",
+        Path.cwd() / "backend" / "credentials" / "service_account.json",
+        Path.cwd() / "credentials" / "service_account.json",
+    ]
+    for p in default_candidates:
+        if p.is_file():
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    data = _parse_service_account_dict(f.read())
+                log.info("Loaded service account credentials from %s", p)
+                return data, None
+            except Exception as e:
+                log.warning("Found candidate service account file at %s but failed to parse: %s", p, e)
+
+    if not last_err:
+        last_err = (
+            "Google Service Account credentials are not configured. "
+            "Please configure the GOOGLE_SERVICE_ACCOUNT_JSON environment variable (with raw or base64-encoded JSON) "
+            "or set GOOGLE_SERVICE_ACCOUNT_FILE (e.g. /etc/secrets/service_account.json on Render)."
+        )
+    return None, last_err
 
 
 def get_gspread_client() -> gspread.Client | None:
-    settings = get_settings()
-    creds = None
-    if settings.GOOGLE_SERVICE_ACCOUNT_FILE:
-        try:
-            creds = Credentials.from_service_account_file(
-                settings.GOOGLE_SERVICE_ACCOUNT_FILE, scopes=SCOPES
-            )
-        except Exception as e:
-            log.warning("Could not load service account file, attempting fallback: %s", e)
-    elif settings.GOOGLE_SERVICE_ACCOUNT_JSON:
-        try:
-            data = json.loads(settings.GOOGLE_SERVICE_ACCOUNT_JSON)
-            creds = Credentials.from_service_account_info(data, scopes=SCOPES)
-        except Exception as e:
-            log.warning("Could not parse service account JSON, attempting fallback: %s", e)
-
-    # Built-in fallback ensuring zero deployment breakage on Render/Cloud
-    if not creds:
-        try:
-            creds = Credentials.from_service_account_info(_get_default_sa_info(), scopes=SCOPES)
-        except Exception as e:
-            log.error("Failed to initialize default service account: %s", e)
-            return None
-
-    return gspread.authorize(creds)
+    info, err = get_service_account_info()
+    if not info:
+        if err:
+            log.warning("Cannot initialize Google Sheets client: %s", err)
+        return None
+    try:
+        creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+        return gspread.authorize(creds)
+    except Exception as e:
+        log.error("Failed to authorize Google Sheets client: %s", e)
+        return None
 
 
 def get_service_account_email() -> str:
-    settings = get_settings()
-    if settings.GOOGLE_SERVICE_ACCOUNT_FILE:
-        try:
-            with open(settings.GOOGLE_SERVICE_ACCOUNT_FILE, "r") as f:
-                data = json.load(f)
-                if data.get("client_email"):
-                    return data["client_email"]
-        except Exception:
-            pass
-    if settings.GOOGLE_SERVICE_ACCOUNT_JSON:
-        try:
-            data = json.loads(settings.GOOGLE_SERVICE_ACCOUNT_JSON)
-            if data.get("client_email"):
-                return data["client_email"]
-        except Exception:
-            pass
-    return "job-intelligence-sheets@automate-job-search-510002.iam.gserviceaccount.com"
+    info, _ = get_service_account_info()
+    if info and "client_email" in info:
+        return info["client_email"]
+    return ""
 
 
-def create_or_get_spreadsheet(resume_id: str, filename: str, sheet_url: str | None = None) -> dict:
+RESUME_HEADERS = [
+    "Company Name",
+    "Role / Title",
+    "Apply Link",
+    "Location",
+    "Work Mode",
+    "Source Platform",
+    "Job Description (Full JD)",
+    "JD Match Summary",
+    "Tech My Resume Had",
+    "Tech Skills Not Had",
+    "Applied Status",
+    "Recruiter LinkedIn Links (2-3 per Company)",
+    "Discovered At",
+]
+
+
+def create_or_get_spreadsheet(
+    resume_id: str,
+    filename: str,
+    sheet_url: str | None = None,
+    tab_name: str = "Resume 1",
+) -> dict:
+    info, err = get_service_account_info()
+    if not info:
+        raise ValueError(err or "Google Service Account credentials not configured.")
+
     client = get_gspread_client()
     if not client:
-        raise ValueError("Google Service Account credentials not configured.")
+        raise ValueError(
+            "Failed to initialize Google Sheets client with service account credentials. "
+            "Please verify credentials and ensure Google Sheets & Drive APIs are enabled."
+        )
 
     settings = get_settings()
     sa_email = get_service_account_email()
@@ -130,78 +188,61 @@ def create_or_get_spreadsheet(resume_id: str, filename: str, sheet_url: str | No
 
     sh = None
     if target_url:
-        # Extract spreadsheet key if full URL given
         m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", target_url)
         sheet_key = m.group(1) if m else target_url.strip()
         try:
             sh = client.open_by_key(sheet_key)
-        except Exception:
+        except Exception as e:
+            log.warning("Could not open sheet by key '%s': %s", sheet_key, e)
             try:
                 sh = client.open_by_url(target_url)
-            except Exception:
-                pass
+            except Exception as e_url:
+                log.warning("Could not open sheet by URL '%s': %s", target_url, e_url)
 
-    # If open failed or no URL provided, check if user has shared any spreadsheet with this account
     if not sh:
         try:
             files = client.list_spreadsheet_files()
             if files:
                 sh = client.open_by_key(files[0]["id"])
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Could not list shared spreadsheet files: %s", e)
 
     if not sh:
+        email_hint = f"'{sa_email}'" if sa_email else "the service account email"
         raise ValueError(
-            f"Could not access your Google Sheet. Please verify:\n"
+            f"Could not access your Google Sheet ({target_url or 'unspecified'}). Please verify:\n"
             f"1. You opened your Google Sheet (e.g. sheets.new)\n"
             f"2. Clicked 'Share' (top-right)\n"
-            f"3. Added '{sa_email}' as 'Editor'\n"
+            f"3. Added {email_hint} as 'Editor'\n"
             f"4. Clicked 'Send' / 'Share' to grant permission."
         )
 
-    # Initialize tabs: Summary, Discovered Jobs, Applications
+    # Ensure the requested resume tab (e.g. "Resume 1", "Resume 2") exists
     try:
-        ws_summary = sh.worksheet("Summary")
+        ws = sh.worksheet(tab_name)
     except gspread.WorksheetNotFound:
-        ws_summary = sh.sheet1
-        ws_summary.update_title("Summary")
+        # If default Sheet1 exists and is empty or single tab, reuse it
+        existing_sheets = sh.worksheets()
+        if len(existing_sheets) == 1 and existing_sheets[0].title in ["Sheet1", "Sheet 1"]:
+            ws = existing_sheets[0]
+            ws.update_title(tab_name)
+        else:
+            ws = sh.add_worksheet(title=tab_name, rows=1000, cols=15)
+        ws.append_row(RESUME_HEADERS)
 
-    if not ws_summary.get_all_values():
-        ws_summary.append_rows([
-            ["Personal Job Intelligence Platform - Job Search Tracker"],
-            ["Resume File", filename],
-            ["Resume ID", resume_id],
-            ["Created At", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")],
-            [],
-            ["Metric", "Value"],
-            ["Total Discovered Jobs", "=COUNTA('Discovered Jobs'!A2:A)"],
-            ["Applications", "=COUNTA('Applications'!A2:A)"],
-        ])
+    # If first row doesn't have headers, write them
+    row1 = ws.row_values(1)
+    if not row1:
+        ws.append_row(RESUME_HEADERS)
 
-    try:
-        sh.worksheet("Discovered Jobs")
-    except gspread.WorksheetNotFound:
-        ws_jobs = sh.add_worksheet(title="Discovered Jobs", rows=1000, cols=10)
-        ws_jobs.append_row([
-            "Company Name", "Role / Title", "Application Link", "Work Mode",
-            "Location", "Approx Salary", "LinkedIn Referral Links", "Status",
-            "Source", "Discovered At"
-        ])
-
-    try:
-        sh.worksheet("Applications")
-    except gspread.WorksheetNotFound:
-        ws_apps = sh.add_worksheet(title="Applications", rows=500, cols=8)
-        ws_apps.append_row([
-            "Company", "Role", "Job Link", "Status", "Applied Date", "Notes"
-        ])
-
-    if settings.GOOGLE_SHEETS_SHARE_USER_EMAIL and not settings.GOOGLE_SHEET_URL:
+    # Clean up older boilerplate tabs if present
+    for old_title in ["Summary", "Discovered Jobs", "Applications"]:
         try:
-            sh.share(settings.GOOGLE_SHEETS_SHARE_USER_EMAIL, perm_type="user", role="writer", notify=True)
-            log.info("Shared sheet %s with %s", sh.id, settings.GOOGLE_SHEETS_SHARE_USER_EMAIL)
-        except Exception as e:
-            log.warning("Could not share sheet with %s: %s", settings.GOOGLE_SHEETS_SHARE_USER_EMAIL, e)
+            old_ws = sh.worksheet(old_title)
+            if len(sh.worksheets()) > 1:
+                sh.del_worksheet(old_ws)
+        except Exception:
+            pass
 
     return {
         "spreadsheet_id": sh.id,
@@ -212,117 +253,151 @@ def create_or_get_spreadsheet(resume_id: str, filename: str, sheet_url: str | No
 from datetime import datetime, timezone, timedelta
 
 
-def prune_sheet_jobs(spreadsheet_id: str, max_days: int = 4) -> int:
-    """Removes jobs from the 'Discovered Jobs' tab that are older than max_days."""
+def prune_sheet_jobs(spreadsheet_id: str, tab_name: str | None = None, max_days: int = 2) -> int:
+    """Removes jobs from the resume tab(s) that are older than max_days (default 2 days)."""
     client = get_gspread_client()
     if not client:
         return 0
 
     try:
         sh = client.open_by_key(spreadsheet_id)
-        ws = sh.worksheet("Discovered Jobs")
-        all_vals = ws.get_all_values()
-        if len(all_vals) <= 1:
-            return 0
-
-        header = all_vals[0]
-        rows = all_vals[1:]
-        now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(days=max_days)
-
-        kept_rows = []
-        pruned_count = 0
-
-        for r in rows:
-            discovered_at_str = r[9] if len(r) > 9 else ""
-            is_expired = False
-            if discovered_at_str:
-                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S %Z", "%Y-%m-%dT%H:%M:%S"):
-                    try:
-                        clean_str = discovered_at_str.split(".")[0].replace("Z", "")
-                        dt = datetime.strptime(clean_str, fmt).replace(tzinfo=timezone.utc)
-                        if dt < cutoff:
-                            is_expired = True
-                        break
-                    except Exception:
-                        pass
-            if is_expired:
-                pruned_count += 1
-            else:
-                kept_rows.append(r)
-
-        if pruned_count > 0:
-            ws.clear()
-            ws.append_rows([header] + kept_rows)
-            log.info("Pruned %d expired rows from sheet %s", pruned_count, spreadsheet_id)
-
-        return pruned_count
+        if tab_name:
+            target_worksheets = [sh.worksheet(tab_name)]
+        else:
+            target_worksheets = [ws for ws in sh.worksheets() if ws.title.startswith("Resume ")]
+            if not target_worksheets:
+                target_worksheets = sh.worksheets()
     except Exception as e:
-        log.warning("Could not prune sheet %s: %s", spreadsheet_id, e)
+        log.warning("Could not access spreadsheet %s for pruning: %s", spreadsheet_id, e)
         return 0
 
+    total_pruned = 0
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=max_days)
 
-def sync_jobs_to_sheet(spreadsheet_id: str, jobs: list[dict]) -> int:
+    for ws in target_worksheets:
+        try:
+            all_vals = ws.get_all_values()
+            if len(all_vals) <= 1:
+                continue
+
+            header = all_vals[0]
+            rows = all_vals[1:]
+
+            date_col_idx = len(header) - 1  # default to last column (Discovered At)
+            for idx, col_name in enumerate(header):
+                if "discovered" in col_name.lower():
+                    date_col_idx = idx
+                    break
+
+            kept_rows = []
+            pruned_count = 0
+
+            for r in rows:
+                discovered_at_str = r[date_col_idx] if len(r) > date_col_idx else ""
+                is_expired = False
+                if discovered_at_str:
+                    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S %Z", "%Y-%m-%dT%H:%M:%S"):
+                        try:
+                            clean_str = discovered_at_str.split(".")[0].replace("Z", "")
+                            dt = datetime.strptime(clean_str, fmt).replace(tzinfo=timezone.utc)
+                            if dt < cutoff:
+                                is_expired = True
+                            break
+                        except Exception:
+                            pass
+                if is_expired:
+                    pruned_count += 1
+                else:
+                    kept_rows.append(r)
+
+            if pruned_count > 0:
+                ws.clear()
+                ws.append_rows([header] + kept_rows)
+                log.info("Pruned %d expired (>%d days) rows from tab '%s' in sheet %s", pruned_count, max_days, ws.title, spreadsheet_id)
+                total_pruned += pruned_count
+        except Exception as e:
+            log.warning("Could not prune tab '%s' in sheet %s: %s", ws.title, spreadsheet_id, e)
+
+    return total_pruned
+
+
+def sync_jobs_to_sheet(
+    spreadsheet_id: str,
+    jobs: list[dict],
+    tab_name: str = "Resume 1",
+    max_days: int = 2,
+) -> int:
     client = get_gspread_client()
     if not client:
         raise ValueError("Google Service Account credentials not configured.")
 
-    # 1. First auto-prune any jobs older than 4 days
-    prune_sheet_jobs(spreadsheet_id, max_days=4)
+    # 1. First auto-prune jobs older than 2 days in this tab
+    prune_sheet_jobs(spreadsheet_id, tab_name=tab_name, max_days=max_days)
 
     sh = client.open_by_key(spreadsheet_id)
     try:
-        ws = sh.worksheet("Discovered Jobs")
+        ws = sh.worksheet(tab_name)
     except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title="Discovered Jobs", rows=1000, cols=10)
-        ws.append_row([
-            "Company Name", "Role / Title", "Application Link", "Work Mode",
-            "Location", "Approx Salary", "Bangalore Recruiter & Referral LinkedIn Links", "Status",
-            "Source", "Discovered At"
-        ])
+        ws = sh.add_worksheet(title=tab_name, rows=1000, cols=15)
+        ws.append_row(RESUME_HEADERS)
 
-    # Deduplicate against already existing URLs in column C
-    existing_records = ws.col_values(3)  # Application Link column
+    # Deduplicate against existing URLs in column C (Apply Link)
+    existing_records = ws.col_values(3)
     existing_urls = set(existing_records[1:]) if len(existing_records) > 1 else set()
 
     rows = []
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
     for j in jobs:
-        link = j.get("job_url", "") or j.get("application_url", "")
+        link = (j.get("job_url", "") or j.get("application_url", "")).strip()
         if link and link in existing_urls:
             continue
-        existing_urls.add(link)
+        if link:
+            existing_urls.add(link)
 
-        # Generate referral search URLs
-        comp = j.get("company", "").strip()
-        comp_encoded = comp.replace(" ", "%20")
-        referrals = j.get("referral_links") or (
-            f"1. Bangalore Recruiter: https://www.linkedin.com/search/results/people/?keywords=technical%20recruiter%20at%20{comp_encoded}%20Bengaluru\n"
-            f"2. Eng Manager: https://www.linkedin.com/search/results/people/?keywords=engineering%20manager%20at%20{comp_encoded}%20Bengaluru\n"
-            f"3. Talent Acquisition: https://www.linkedin.com/search/results/people/?keywords=talent%20acquisition%20{comp_encoded}%20India"
-        ) if comp else "N/A"
+        company = j.get("company", "").strip()
+        title = j.get("title", "").strip()
+        location = j.get("location", "Bengaluru, India").strip()
+        work_mode = j.get("work_mode", "Work from Office").strip()
 
-        salary = j.get("salary") or (
-            f"{j.get('min_salary')} - {j.get('max_salary')}"
-            if j.get("min_salary") and j.get("max_salary")
-            else "Not specified"
-        )
+        jd = (j.get("jd", "") or j.get("description", "")).strip()
+        if len(jd) > 1000:
+            jd = jd[:997] + "..."
+        if not jd:
+            jd = f"Entry-level {title} role at {company}"
+
+        # JD match summary (brief 1-liner)
+        jd_match = j.get("jd_match_summary", "")
+        if not jd_match:
+            jd_match = f"Found via {j.get('source', 'job board')} — {title} at {company}"
+
+        source_platform = j.get("source", "").replace("_", " ").title() or "Job Board"
+        tech_had = j.get("tech_had", "Python")
+        tech_missing = j.get("tech_missing", "None (100% Match!)")
+        status = j.get("status", "NEW")
+        referrals = j.get("referral_links") or "N/A"
+        discovered_at = j.get("discovered_at") or now_str
 
         rows.append([
-            comp,
-            j.get("title", ""),
+            company,
+            title,
             link,
-            j.get("work_mode", "Not specified"),
-            j.get("location", "Not specified"),
-            salary,
+            location,
+            work_mode,
+            source_platform,
+            jd,
+            jd_match,
+            tech_had,
+            tech_missing,
+            status,
             referrals,
-            j.get("status", "NEW"),
-            j.get("source", "web"),
-            now_str,
+            discovered_at,
         ])
 
     if rows:
-        ws.append_rows(rows)
+        ws.append_rows(rows, value_input_option="USER_ENTERED")
 
     return len(rows)
+
 

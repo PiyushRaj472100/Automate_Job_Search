@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     REQUEST_TIMEOUT: float = 20
     RETRY_MAX_ATTEMPTS: int = 3
     MAX_UPLOAD_MB: int = 10
+    HUNT_INTERVAL_MINUTES: int = 210  # ~3.5 hours, spaced 5-8 times per day
     VERSION: str = "0.1.0"
 
     @property
