@@ -153,8 +153,10 @@ def is_suitable_job(
 ) -> tuple[bool, int]:
     """
     Returns (is_suitable, priority_score).
-    Strictly accepts only verified 0-2 years experience / entry-level / fresher roles in AI, ML, Python, Data Science, and Backend in India (Bangalore #1).
-    Zero tolerance for >2 years experience, senior roles, or frontend.
+    Accepts AI, ML, Python, Data Science, and Backend tech roles
+    across all experience levels — freshers, juniors, 0-2 years, and standard tech roles.
+    Only rejects clearly senior/executive roles and non-tech domains.
+    Sources include career pages (Greenhouse/Lever) which don't tag 'fresher' in every JD.
     """
     t_low = title.lower()
     d_low = (description or "").lower()
@@ -164,50 +166,47 @@ def is_suitable_job(
     for kw in FORBIDDEN_DOMAINS:
         if kw in t_low:
             return False, 0
-
-    # 2. Aggregator and course filter
-    if COURSE_AGGREGATOR_PATTERN.search(t_low) or COURSE_AGGREGATOR_PATTERN.search(d_low[:500]):
-        return False, 0
-
-    # 3. Level reject (Level 2/3, Senior, Lead, Consultant)
-    if LEVEL_REJECT_PATTERN.search(t_low):
-        return False, 0
-    if "consultant" in t_low and not any(w in t_low for w in ["junior", "fresher", "intern", "associate", "trainee"]):
-        return False, 0
-
-    # 4. Strict Seniority & Experience filter: reject senior, mid-level, SDE 2/3, and >=3 years requirement
-    for kw in SENIOR_KEYWORDS:
-        if kw in t_low or kw in d_low:
+    # If the role title includes backend + frontend, it is full-stack (reject unless Python-specific)
+    if "full stack" in t_low or "fullstack" in t_low:
+        if not any(k in t_low for k in ["python", "backend", "api", "data", "ai", "ml"]):
             return False, 0
 
+    # 2. Aggregator and course filter
+    if COURSE_AGGREGATOR_PATTERN.search(t_low) or COURSE_AGGREGATOR_PATTERN.search(d_low[:400]):
+        return False, 0
+
+    # 3. Level reject ON TITLE ONLY (Senior, Director, VP, Principal, SDE 2/3)
+    # NOT on description — descriptions mention senior teammates but don't make the ROLE senior
+    if LEVEL_REJECT_PATTERN.search(t_low):
+        return False, 0
+    for kw in SENIOR_KEYWORDS:
+        if kw in t_low:  # title-only check now
+            return False, 0
+
+    # 4. Experience reject: Reject if demanding 3+ years (title or description both apply)
     if EXP_REJECT_PATTERN.search(t_low) or EXP_REJECT_PATTERN.search(d_low):
         return False, 0
 
-    # 5. Mandatory Fresher Confirmation: Either title or JD MUST confirm it is for freshers, interns, 0-2 yrs, or academic projects
-    has_fresher_title = bool(FRESHER_CONFIRM_PATTERN.search(t_low))
-    has_fresher_desc = bool(FRESHER_CONFIRM_PATTERN.search(d_low))
-    if not (has_fresher_title or has_fresher_desc):
-        return False, 0
-
-    # Disallow unverified short placeholder descriptions unless title is explicitly an intern/fresher
-    if len(d_low.strip()) < 80 and not has_fresher_title:
-        return False, 0
-
-    # 6. Positive domain match: MUST strictly be AI, ML, Data Science, Python, or Backend
+    # 5. Positive domain match: MUST be AI, ML, Data Science, Python, or Backend
     has_title_match = bool(AI_ML_PYTHON_PATTERN.search(t_low))
-    if not has_title_match:
-        is_tech_role = any(r in t_low for r in ["developer", "engineer", "scientist", "intern", "programmer"])
-        has_desc_match = bool(AI_ML_PYTHON_PATTERN.search(d_low))
-        if not (is_tech_role and has_desc_match):
-            return False, 0
+    is_tech_role = any(r in t_low for r in [
+        "developer", "engineer", "scientist", "intern", "programmer",
+        "analyst", "trainee", "associate", "specialist"
+    ])
+    has_desc_match = bool(AI_ML_PYTHON_PATTERN.search(d_low))
+    if not (has_title_match or (is_tech_role and has_desc_match)):
+        return False, 0
 
-    # 7. Strict India filter: must be in Bangalore, an Indian tech metro, or remote eligible for India
+    # 6. India or Global/Remote filter (open remote counts for India-based candidates)
     is_in_india = any(hub in loc_low for hub in INDIAN_HUBS)
-    is_remote_open = ("remote" in loc_low or "anywhere" in loc_low or "worldwide" in loc_low) and not any(fl in loc_low for fl in FOREIGN_ONLY_LOCATIONS)
+    is_remote_open = (
+        "remote" in loc_low or "anywhere" in loc_low or "worldwide" in loc_low
+        or "global" in loc_low or "work from home" in loc_low or "wfh" in loc_low
+    ) and not any(fl in loc_low for fl in FOREIGN_ONLY_LOCATIONS)
     if not (is_in_india or is_remote_open):
         return False, 0
 
-    # 8. Score by Indian location priority (Bangalore #1)
+    # 7. Score by Indian location priority (Bangalore #1)
     if "bangalore" in loc_low or "bengaluru" in loc_low:
         priority = 100  # 1st priority: Bangalore, India
     elif any(hub in loc_low for hub in INDIAN_HUBS):

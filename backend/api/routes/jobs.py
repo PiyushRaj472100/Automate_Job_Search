@@ -76,8 +76,8 @@ async def list_jobs(
     work_mode: str | None = None,
     city: str | None = None,
     source: str | None = None,
-    sort_by: str = Query("latest", pattern="^(latest|bangalore)$"),
-    limit: int = Query(60, ge=1, le=200),
+    sort_by: str = Query("latest", pattern="^(latest|bangalore|source|company)$"),
+    limit: int = Query(80, ge=1, le=300),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_session),
 ):
@@ -103,13 +103,16 @@ async def list_jobs(
 
     # Sorting
     if sort_by == "bangalore":
-        # Bangalore first, then latest recruiter posting
         blr_priority = case(
             (Job.location.ilike("%bangalore%"), 1),
             (Job.location.ilike("%bengaluru%"), 1),
             else_=2
         )
         query = query.order_by(blr_priority, Job.first_seen_at.desc().nullslast(), Job.created_at.desc())
+    elif sort_by == "source":
+        query = query.order_by(Job.source.asc(), Job.first_seen_at.desc().nullslast(), Job.created_at.desc())
+    elif sort_by == "company":
+        query = query.order_by(Job.company.asc(), Job.first_seen_at.desc().nullslast(), Job.created_at.desc())
     else:
         # Default: latest recruiter posting first (e.g. 1 hour ago before 1 day ago)
         query = query.order_by(Job.first_seen_at.desc().nullslast(), Job.created_at.desc())
