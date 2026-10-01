@@ -159,20 +159,54 @@ class GoogleSheetsService:
     def append_job_row(self, spreadsheet_id: str, job_data: dict[str, Any]) -> int:
         """Append a new job row to the 'Jobs' tab adhering to the exact 27-column header order.
 
+        Prevents duplicate rows: If a job with matching Job Link, Job ID, or Company+Title
+        already exists, skips duplicate append and returns the existing row index.
+
         Returns:
-            The 1-based row index of the newly added row.
+            The 1-based row index of the job in the worksheet.
         """
         client = self.manager.get_client()
         sheet = client.open_by_key(spreadsheet_id)
         ws = sheet.worksheet(TAB_JOBS)
+
+        all_values = ws.get_all_values()
+        if len(all_values) > 1:
+            headers = all_values[0]
+            link_idx = headers.index("Job Link") if "Job Link" in headers else -1
+            job_id_idx = headers.index("Job ID") if "Job ID" in headers else -1
+            title_idx = headers.index("Job Title") if "Job Title" in headers else -1
+            comp_idx = headers.index("Company") if "Company" in headers else -1
+
+            target_link = str(job_data.get("Job Link", "")).strip().rstrip("/")
+            target_id = str(job_data.get("Job ID", "")).strip()
+            target_comp = str(job_data.get("Company", "")).strip().lower()
+            target_title = str(job_data.get("Job Title", "")).strip().lower()
+
+            for row_num, row in enumerate(all_values[1:], start=2):
+                existing_link = row[link_idx].strip().rstrip("/") if 0 <= link_idx < len(row) else ""
+                existing_id = row[job_id_idx].strip() if 0 <= job_id_idx < len(row) else ""
+                existing_comp = row[comp_idx].strip().lower() if 0 <= comp_idx < len(row) else ""
+                existing_title = row[title_idx].strip().lower() if 0 <= title_idx < len(row) else ""
+
+                is_dup = False
+                if target_id and existing_id and target_id == existing_id:
+                    is_dup = True
+                elif target_link and existing_link and target_link == existing_link:
+                    is_dup = True
+                elif target_comp and existing_comp and target_title and existing_title:
+                    if target_comp == existing_comp and target_title == existing_title:
+                        is_dup = True
+
+                if is_dup:
+                    logger.info("Job '%s' at '%s' already exists in sheet at row %d. Skipping duplicate append.", target_title, target_comp, row_num)
+                    return row_num
 
         # Assemble row values exactly in order of JOBS_HEADERS
         row_values = [str(job_data.get(header, "")) for header in JOBS_HEADERS]
         ws.append_row(row_values, value_input_option="USER_ENTERED")
 
         # Determine new row index
-        all_values = ws.get_all_values()
-        return len(all_values)
+        return len(all_values) + 1
 
     def update_job_row(self, spreadsheet_id: str, row_index: int, updated_data: dict[str, Any]) -> None:
         """Update specific cells or the full row of an existing job in the 'Jobs' tab."""

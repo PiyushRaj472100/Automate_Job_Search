@@ -128,6 +128,41 @@ class TestResumeJobMatchingEngine:
         assert eval_yoe.match_level == MatchLevel.REJECTED
         assert eval_yoe.is_senior_role is True
 
+    def test_more_than_two_years_and_mid_level_rejected(self):
+        """Roles requiring > 2 years of experience or mid-level titles must be rejected for 0-2 year candidates."""
+        # 3+ years
+        job_3_plus = {
+            "title": "Software Engineer",
+            "company": "Growth Tech",
+            "location": "Remote",
+            "description": "Requires 3+ years of experience in Python and FastAPI.",
+        }
+        eval_3 = self.matcher.evaluate(job=job_3_plus, profile=self.candidate_profile)
+        assert eval_3.match_level == MatchLevel.REJECTED
+        assert eval_3.is_senior_role is True
+
+        # 3-5 years
+        job_range = {
+            "title": "Backend Developer",
+            "company": "Scale Systems",
+            "location": "Remote",
+            "description": "3-5 years of hands-on experience building distributed systems.",
+        }
+        eval_range = self.matcher.evaluate(job=job_range, profile=self.candidate_profile)
+        assert eval_range.match_level == MatchLevel.REJECTED
+        assert eval_range.is_senior_role is True
+
+        # Mid-level title (e.g. SDE II)
+        job_sde2 = {
+            "title": "Software Engineer II - Python",
+            "company": "Global Cloud",
+            "location": "Remote",
+            "description": "Looking for SDE II with solid Python background.",
+        }
+        eval_sde2 = self.matcher.evaluate(job=job_sde2, profile=self.candidate_profile)
+        assert eval_sde2.match_level == MatchLevel.REJECTED
+        assert eval_sde2.is_senior_role is True
+
     def test_fresher_role_strongly_considered(self):
         """Roles explicitly labeled 'Fresher' or 'Graduate Trainee' receive strong consideration."""
         job_fresher = {

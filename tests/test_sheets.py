@@ -487,3 +487,48 @@ def test_system_status_tab_all_required_metrics(db_session: Session, mock_sheets
     assert status_row["Status"] == "OPERATIONAL"
     assert status_row["Audit Log"] == "HEALTHY"
 
+
+def test_append_job_row_deduplication(mock_sheets_service: GoogleSheetsService):
+    """Verify that append_job_row skips duplicate rows based on Job Link, Job ID, or Company+Title."""
+    client = mock_sheets_service.manager.get_client()
+    sheet = client.create("Test Deduplication Sheet")
+    ws = sheet.add_worksheet(TAB_JOBS)
+    ws.append_row(JOBS_HEADERS)
+
+    job_1 = {
+        "Job Title": "Junior Backend Engineer",
+        "Company": "Stripe",
+        "Job Link": "https://boards.greenhouse.io/stripe/jobs/101",
+        "Job ID": "gh_stripe_101",
+        "Experience": "0-2 years",
+    }
+    row_1 = mock_sheets_service.append_job_row(sheet.id, job_1)
+    assert row_1 == 2
+
+    # Appending the exact same job again should return row 2 and not add row 3
+    row_dup = mock_sheets_service.append_job_row(sheet.id, job_1)
+    assert row_dup == 2
+    assert len(ws.get_all_values()) == 2  # Header + 1 row only!
+
+    # Appending with same link but different title should still be detected as duplicate
+    job_dup_link = {
+        "Job Title": "Junior Backend Developer",
+        "Company": "Stripe",
+        "Job Link": "https://boards.greenhouse.io/stripe/jobs/101",
+        "Job ID": "gh_stripe_999",
+    }
+    row_dup_link = mock_sheets_service.append_job_row(sheet.id, job_dup_link)
+    assert row_dup_link == 2
+    assert len(ws.get_all_values()) == 2
+
+    # Appending a truly distinct job should succeed
+    job_2 = {
+        "Job Title": "Frontend Engineer I",
+        "Company": "Figma",
+        "Job Link": "https://boards.greenhouse.io/figma/jobs/202",
+        "Job ID": "gh_figma_202",
+    }
+    row_2 = mock_sheets_service.append_job_row(sheet.id, job_2)
+    assert row_2 == 3
+    assert len(ws.get_all_values()) == 3
+

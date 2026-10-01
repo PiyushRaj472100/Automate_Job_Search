@@ -4,6 +4,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.discovery.adapters.arbeitnow import ArbeitnowAdapter
+from backend.discovery.adapters.greenhouse import GreenhouseAdapter
+from backend.discovery.adapters.lever import LeverAdapter
 from backend.discovery.models import SearchQuery, SourceHealthCheck, SourcePolicy
 from backend.discovery.normalizer import NormalizedJob
 from backend.discovery.policy import SOURCE_POLICIES
@@ -12,8 +14,8 @@ from backend.discovery.registry import DiscoveryExecutionSummary, JobDiscoveryCo
 
 router = APIRouter(prefix="/discovery", tags=["Job Discovery"])
 
-# Instantiate the standard discovery collector with the verified live provider
-collector = JobDiscoveryCollector([ArbeitnowAdapter()])
+# Instantiate the standard discovery collector with live providers and career page ATS adapters
+collector = JobDiscoveryCollector([ArbeitnowAdapter(), GreenhouseAdapter(), LeverAdapter()])
 query_engine = SearchQueryEngine()
 
 

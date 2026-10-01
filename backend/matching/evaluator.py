@@ -16,7 +16,7 @@ from backend.normalization.schemas import CanonicalJob
 
 logger = logging.getLogger("job_intelligence.matching.evaluator")
 
-# Keywords that identify entry-level and fresher-friendly opportunities
+# Keywords that identify entry-level and fresher-friendly opportunities (Strict 0-2 years)
 FRESHER_KEYWORDS = [
     "fresher",
     "entry level",
@@ -36,14 +36,12 @@ FRESHER_KEYWORDS = [
     "developer i",
     "0-1",
     "0-2",
-    "0-3",
     "0 to 1",
     "0 to 2",
-    "0 to 3",
     "0 years",
 ]
 
-# Keywords that denote genuinely senior roles that must be rejected for freshers
+# Keywords that denote mid/senior roles or excessive tenure (> 2 years) that must be rejected
 SENIOR_KEYWORDS = [
     "senior",
     "sr.",
@@ -55,13 +53,39 @@ SENIOR_KEYWORDS = [
     "director",
     "head of",
     "engineering manager",
+    "mid-level",
+    "mid level",
+    "software engineer ii",
+    "swe ii",
+    "swe 2",
+    "sde ii",
+    "sde 2",
+    "developer ii",
+    "engineer ii",
+    "level 2",
+    "3+ years",
+    "4+ years",
     "5+ years",
     "6+ years",
     "7+ years",
     "8+ years",
     "10+ years",
+    "3-5 years",
+    "3 to 5 years",
+    "2-4 years",
+    "2 to 4 years",
+    "3-6 years",
+    "4-6 years",
     "5-8 years",
     "7-10 years",
+    "minimum 3 years",
+    "at least 3 years",
+    "min 3 years",
+    "minimum 4 years",
+    "at least 4 years",
+    "3+ yrs",
+    "4+ yrs",
+    "5+ yrs",
 ]
 
 # Unrelated domain keywords
@@ -132,8 +156,8 @@ class ResumeJobMatcher:
         elif exp_eval["is_senior"]:
             match_level = MatchLevel.REJECTED
             why_it_matches = (
-                f"Role '{job_data['title']}' is a senior position ({exp_eval['experience_summary']}). "
-                "It requires extensive commercial tenure and leadership beyond entry-level parameters."
+                f"Role '{job_data['title']}' requires experience beyond entry-level ({exp_eval['experience_summary']}). "
+                "It exceeds the 0-2 years experience criteria."
             )
         else:
             match_level, why_it_matches = self._determine_match_level(
@@ -285,45 +309,67 @@ class ResumeJobMatcher:
         return any(domain in lower_title for domain in UNRELATED_DOMAINS)
 
     def _evaluate_experience(self, job_data: dict[str, Any]) -> dict[str, Any]:
-        """Evaluate experience constraints and enforce fresher/senior rules."""
-        text = f"{job_data['title']} {job_data['description'][:600]}".lower()
+        """Evaluate experience constraints and enforce strict 0-2 years fresher/entry-level rules."""
+        title_lower = job_data["title"].lower()
+        text = f"{title_lower} {job_data['description'][:1000]}".lower()
 
-        # Check for senior title or keywords
-        has_senior_title = any(re.search(r"\b" + re.escape(kw) + r"\b", job_data["title"].lower()) for kw in ["senior", "sr.", "sr", "lead", "principal", "staff", "architect", "director"])
-        has_senior_text = any(kw in text for kw in ["5+ years", "6+ years", "7+ years", "8+ years", "10+ years", "5-8 years", "senior level"])
-
-        is_senior = has_senior_title or has_senior_text
+        # Check for senior or mid-level titles
+        senior_title_patterns = [
+            r"\bsenior\b", r"\bsr\.?\b", r"\blead\b", r"\bprincipal\b", r"\bstaff\b",
+            r"\barchitect\b", r"\bdirector\b", r"\bmanager\b", r"\bhead of\b",
+            r"\bmid-level\b", r"\bmid level\b", r"\bsde[- ]?ii\b", r"\bswe[- ]?ii\b",
+            r"\bsde[- ]?2\b", r"\bswe[- ]?2\b", r"\bengineer[- ]?ii\b", r"\bdeveloper[- ]?ii\b",
+        ]
+        has_senior_title = any(re.search(pat, title_lower) for pat in senior_title_patterns)
+        has_senior_text = any(re.search(r"\b" + re.escape(kw) + r"\b", text) for kw in SENIOR_KEYWORDS)
 
         # Check for fresher keywords
         has_fresher_keywords = any(re.search(r"\b" + re.escape(kw) + r"\b", text) for kw in FRESHER_KEYWORDS)
 
-        # Check for explicit year requirements (e.g. '1+ years', '0-2 years', '3+ years')
-        yoe_match = re.search(r"(\d+)\s*(?:-|to)\s*(\d+)\s*(?:years?|yrs?|yoe)", text)
-        min_years = 0
-        if yoe_match:
-            min_years = int(yoe_match.group(1))
-        else:
-            single_match = re.search(r"(\d+)\+?\s*(?:years?|yrs?|yoe)", text)
-            if single_match:
-                min_years = int(single_match.group(1))
+        # Extract explicit year requirements
+        # 1. Range: e.g. '0-2 years', '1-3 years', '3-5 years', '2 to 4 years'
+        range_match = re.search(r"(\d+)\s*(?:-|to)\s*(\d+)\s*(?:years?|yrs?|yoe)", text)
+        # 2. Plus: e.g. '3+ years', '1+ years'
+        plus_match = re.search(r"(\d+)\s*\+\s*(?:years?|yrs?|yoe)", text)
+        # 3. Minimum prefix: e.g. 'minimum of 3 years', 'at least 3 years'
+        min_prefix_match = re.search(r"(?:minimum|at least|min\.?)\s*(?:of)?\s*(\d+)\s*(?:years?|yrs?|yoe)", text)
+        # 4. Single match: e.g. '3 years experience'
+        single_match = re.search(r"(\d+)\s*(?:years?|yrs?|yoe)", text)
 
-        if min_years >= 4:
+        min_years = 0
+        max_years = 0
+        if range_match:
+            min_years = int(range_match.group(1))
+            max_years = int(range_match.group(2))
+        elif plus_match:
+            min_years = int(plus_match.group(1))
+            max_years = min_years + 2
+        elif min_prefix_match:
+            min_years = int(min_prefix_match.group(1))
+            max_years = min_years + 2
+        elif single_match:
+            min_years = int(single_match.group(1))
+            max_years = min_years
+
+        # STRICT 0-2 YEARS RULE:
+        # If minimum required experience exceeds 2 years (e.g. 3+, 4+, 3-5),
+        # or if range is e.g. 2-4+ years with senior wording, mark as senior/ineligible.
+        is_senior = has_senior_title or has_senior_text
+        if min_years > 2 or (min_years >= 2 and max_years >= 4):
             is_senior = True
 
         concerns: list[str] = []
         is_suitable_fresher = True
         is_one_plus = (
-            "1+ year" in text
-            or "1+ years" in text
-            or "1-2 year" in text
-            or "1-2 years" in text
-            or (min_years == 1 and not any(k in text for k in ["0-1", "0–1", "0-2", "0–2", "0 to 1", "0 to 2"]))
-        )
+            ("1+ year" in text or "1+ years" in text or "1-2 year" in text or "1-2 years" in text)
+            and not is_senior
+            and min_years <= 2
+        ) or (min_years == 1 and not any(k in text for k in ["0-1", "0–1", "0-2", "0–2", "0 to 1", "0 to 2"]) and not is_senior)
 
         if is_senior:
             is_suitable_fresher = False
-            summary = f"Requires senior tenure ({min_years}+ years or leadership title). Genuinely senior position."
-            concerns.append("Role demands extensive senior commercial experience beyond entry-level bounds.")
+            summary = f"Requires experience beyond entry-level ({min_years}+ years or mid/senior title). Exceeds 0-2 years criteria."
+            concerns.append(f"Role requires ~{min_years}+ years commercial experience, exceeding the 0-2 years target bounds.")
         elif is_one_plus:
             summary = "Stipulates 1+ years experience; highly accessible for freshers with substantive project portfolios or internship experience."
             concerns.append("Job mentions 1+ years preference; portfolio projects and technical foundation will be crucial.")

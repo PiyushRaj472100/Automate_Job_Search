@@ -45,6 +45,20 @@ SOURCE_POLICIES: dict[str, SourcePolicy] = {
         permitted_access_method="Public Company Career Board API (/v1/boards/{company}/jobs)",
         notes="Official direct company ATS job feeds.",
     ),
+    # 4. Lever Official Company Career Postings (Active Provider)
+    "lever": SourcePolicy(
+        source_name="lever",
+        source_type=SourceType.COMPANY_CAREER_PAGE,
+        base_url="https://api.lever.co/v0/postings",
+        official_api_available=True,
+        feed_available=True,
+        public_page_available=True,
+        robots_restrictions="Permitted via public postings API",
+        rate_limit_per_minute=40,
+        authentication_required=False,
+        permitted_access_method="Public Company Career Postings API (/v0/postings/{company})",
+        notes="Official direct company Lever ATS job feeds.",
+    ),
     # 4. LinkedIn Jobs (Policy Specification)
     "linkedin": SourcePolicy(
         source_name="linkedin",

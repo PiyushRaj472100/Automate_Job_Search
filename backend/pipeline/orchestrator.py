@@ -9,6 +9,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from backend.discovery.adapters.arbeitnow import ArbeitnowAdapter
+from backend.discovery.adapters.greenhouse import GreenhouseAdapter
+from backend.discovery.adapters.lever import LeverAdapter
 from backend.discovery.models import SearchQuery
 from backend.discovery.registry import JobDiscoveryCollector
 from backend.ingestion.service import ResumeIngestionService
@@ -54,10 +56,12 @@ class JobIntelligencePipeline:
     ) -> None:
         self.ingestion_service = ingestion_service or ResumeIngestionService()
 
-        # Initialize discovery with live Arbeitnow adapter by default
+        # Initialize discovery with live adapters (Arbeitnow + Greenhouse + Lever Career Boards)
         if discovery_collector is None:
             collector = JobDiscoveryCollector()
             collector.register(ArbeitnowAdapter())
+            collector.register(GreenhouseAdapter())
+            collector.register(LeverAdapter())
             self.discovery_collector = collector
         else:
             self.discovery_collector = discovery_collector
@@ -314,7 +318,13 @@ class JobIntelligencePipeline:
                 )
 
                 resume_label = f"{candidate_name} ({file_name})"
+                seen_job_keys: set[str] = set()
                 for job_out in final_job_outputs:
+                    job_key = (job_out.job_url or "").strip().rstrip("/") or f"{job_out.company.lower()}|{job_out.title.lower()}"
+                    if job_key in seen_job_keys:
+                        continue
+                    seen_job_keys.add(job_key)
+
                     row_data = job_out.to_sheet_row_dict(resume_label=resume_label)
                     row_idx = self.sheets_service.append_job_row(
                         spreadsheet_id=spreadsheet_id,
@@ -401,8 +411,21 @@ class JobIntelligencePipeline:
             db_session.add(company)
             db_session.flush()
 
-        # 2. Job Entity
+        # 2. Job Entity (Cross-run robust deduplication: dedup_hash, canonical_url, job_url, and normalized tuple)
+        norm_title = cjob.title.lower().strip()
+        norm_location = cjob.location.lower().strip()
         job_entity = db_session.query(Job).filter(Job.dedup_hash == cjob.dedup_hash).first()
+        if not job_entity and cjob.canonical_url:
+            job_entity = db_session.query(Job).filter(Job.canonical_url == cjob.canonical_url).first()
+        if not job_entity and cjob.job_url:
+            job_entity = db_session.query(Job).filter(Job.job_url == cjob.job_url).first()
+        if not job_entity:
+            job_entity = db_session.query(Job).filter(
+                Job.normalized_company == norm_company,
+                Job.normalized_title == norm_title,
+                Job.normalized_location == norm_location,
+            ).first()
+
         if not job_entity:
             job_entity = Job(
                 company_id=company.id,
@@ -417,13 +440,16 @@ class JobIntelligencePipeline:
                 source=cjob.primary_source,
                 status="active" if ver_result.status in (VerificationStatus.VERIFIED, VerificationStatus.ACTIVE) else "closed",
                 normalized_company=norm_company,
-                normalized_title=cjob.title.lower(),
-                normalized_location=cjob.location.lower(),
+                normalized_title=norm_title,
+                normalized_location=norm_location,
                 dedup_hash=cjob.dedup_hash,
                 last_verified=datetime.now(UTC),
             )
             db_session.add(job_entity)
             db_session.flush()
+        else:
+            job_entity.last_seen = datetime.now(UTC)
+            job_entity.last_verified = datetime.now(UTC)
 
         # 3. Job Match Entity
         existing_match = (
