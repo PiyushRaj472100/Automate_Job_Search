@@ -3,6 +3,7 @@
 from collections.abc import AsyncGenerator, Generator
 
 from sqlalchemy import create_engine
+from contextlib import contextmanager
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,

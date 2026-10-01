@@ -11,6 +11,7 @@ from google.oauth2.service_account import Credentials
 from backend.core.config import get_settings
 
 logger = logging.getLogger("job_intelligence.sheets_client")
+from backend.core.retry import retry
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -38,6 +39,7 @@ class GoogleSheetsManager:
         self.service_account_json = service_account_json or self.settings.GOOGLE_SERVICE_ACCOUNT_JSON
         self._client: gspread.Client | None = client
 
+    @retry()
     def get_client(self) -> gspread.Client:
         """Obtain an authenticated gspread Client instance."""
         if self._client:

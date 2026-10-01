@@ -46,7 +46,7 @@ class Settings(BaseSettings):
         description="Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL",
     )
     CORS_ORIGINS: str = Field(
-        default="http://localhost:3000,http://localhost:8000",
+        default="http://localhost:3000,http://localhost:3001,http://localhost:5173,http://localhost:8000,http://localhost:8001,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:5173,http://127.0.0.1:8000,http://127.0.0.1:8001",
         description="Comma-separated list of allowed CORS origins",
     )
 
@@ -103,11 +103,21 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> list[str]:
-
         """Parse comma-separated CORS origins into a list of strings."""
-        if not self.CORS_ORIGINS:
-            return ["*"]
-        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+        origins = [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()] if self.CORS_ORIGINS else []
+        defaults = [
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://localhost:5173",
+            "http://localhost:8000",
+            "http://localhost:8001",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:3001",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:8000",
+            "http://127.0.0.1:8001",
+        ]
+        return list(dict.fromkeys(origins + defaults))
 
 
 @lru_cache

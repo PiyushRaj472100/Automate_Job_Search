@@ -1,5 +1,4 @@
-"""API endpoints for resume upload, listing, and profile inspection."""
-
+import logging
 import uuid
 from typing import Annotated, Any
 
@@ -7,6 +6,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from sqlalchemy.orm import Session
 
 from backend.db.session import get_sync_session
+
+logger = logging.getLogger("job_intelligence.resumes")
 from backend.ingestion.extractor import ResumeExtractionError
 from backend.ingestion.parser import (
     CorruptFileError,
@@ -77,7 +78,11 @@ async def upload_resume(
 )
 def list_resumes(db: Annotated[Session, Depends(get_sync_session)]) -> list[ResumeSummaryResponse]:
     """List all stored resume records."""
-    return ingestion_service.get_all_resumes(db)
+    try:
+        return ingestion_service.get_all_resumes(db)
+    except Exception as e:
+        logger.warning("Database unavailable when listing resumes: %s", e)
+        return []
 
 
 @router.get(
